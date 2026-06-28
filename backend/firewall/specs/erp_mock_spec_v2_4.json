@@ -1,0 +1,35 @@
+{
+  "service": "erp_mock",
+  "version": "v2.4",
+  "description": "N version of ERP API (Current production schema, used by Firewall)",
+  "endpoints": {
+    "http://localhost:8000/mock-erp/payments/post": {
+      "method": "POST",
+      "required": ["payment_reference_id", "vendor_id", "amount_paise", "vendor_ifsc_code", "account_number"],
+      "optional": ["narration", "payment_mode", "tds_amount"],
+      "properties": {
+        "payment_reference_id": {"type": "string", "description": "RENAMED IN v2.4"},
+        "vendor_id": {"type": "string"},
+        "amount_paise": {"type": "number", "description": "RENAMED IN v2.4"},
+        "vendor_ifsc_code": {"type": "string", "description": "11-char IFSC code (RENAMED IN v2.4)"},
+        "account_number": {"type": "string"},
+        "narration": {"type": "string"},
+        "payment_mode": {"type": "string", "enum": ["NEFT", "RTGS", "IMPS", "UPI"]},
+        "tds_amount": {"type": "number"}
+      }
+    },
+    "http://localhost:8000/mock-erp/invoices/validate": {
+      "method": "POST",
+      "required": ["invoice_number", "vendor_gstin", "amount"],
+      "optional": ["invoice_date", "hsn_code", "gst_rate"],
+      "properties": {
+        "invoice_number": {"type": "string", "description": "RENAMED IN v2.4"},
+        "vendor_gstin": {"type": "string"},
+        "amount": {"type": "number", "description": "RENAMED IN v2.4"},
+        "invoice_date": {"type": "string"},
+        "hsn_code": {"type": "string"},
+        "gst_rate": {"type": "number"}
+      }
+    }
+  }
+}

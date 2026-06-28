@@ -1,0 +1,35 @@
+{
+  "service": "erp_mock",
+  "version": "v2.1",
+  "description": "N-1 version of ERP API (Provided to LLM Agents as context)",
+  "endpoints": {
+    "http://localhost:8000/mock-erp/payments/post": {
+      "method": "POST",
+      "required": ["payment_ref_old", "vendor_id", "amt_in_paise", "vendor_acc_IFSC_2023", "account_number"],
+      "optional": ["narration", "payment_mode", "tds_amount"],
+      "properties": {
+        "payment_ref_old": {"type": "string", "description": "OLD PARAMETER NAME"},
+        "vendor_id": {"type": "string"},
+        "amt_in_paise": {"type": "number", "description": "OLD PARAMETER NAME"},
+        "vendor_acc_IFSC_2023": {"type": "string", "description": "11-char IFSC code (OLD PARAMETER NAME)"},
+        "account_number": {"type": "string"},
+        "narration": {"type": "string"},
+        "payment_mode": {"type": "string", "enum": ["NEFT", "RTGS", "IMPS", "UPI"]},
+        "tds_amount": {"type": "number"}
+      }
+    },
+    "http://localhost:8000/mock-erp/invoices/validate": {
+      "method": "POST",
+      "required": ["invoice_num", "vendor_gstin", "invoice_amt"],
+      "optional": ["invoice_date", "hsn_code", "gst_rate"],
+      "properties": {
+        "invoice_num": {"type": "string", "description": "OLD PARAMETER NAME"},
+        "vendor_gstin": {"type": "string"},
+        "invoice_amt": {"type": "number", "description": "OLD PARAMETER NAME"},
+        "invoice_date": {"type": "string"},
+        "hsn_code": {"type": "string"},
+        "gst_rate": {"type": "number"}
+      }
+    }
+  }
+}

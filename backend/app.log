@@ -1,0 +1,161 @@
+Starting import
+Imported main
+Running uvicorn
+INFO:     Started server process [93970]
+INFO:     Waiting for application startup.
+🚀 Initializing MORPHEUS Backend...
+2026-06-26 00:52:07,698 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-06-26 00:52:07,700 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("court_sessions")
+2026-06-26 00:52:07,700 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-06-26 00:52:07,703 INFO sqlalchemy.engine.Engine PRAGMA temp.table_info("court_sessions")
+2026-06-26 00:52:07,703 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-06-26 00:52:07,705 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("cases")
+2026-06-26 00:52:07,705 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-06-26 00:52:07,706 INFO sqlalchemy.engine.Engine PRAGMA temp.table_info("cases")
+2026-06-26 00:52:07,706 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-06-26 00:52:07,706 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("audit_logs")
+2026-06-26 00:52:07,706 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-06-26 00:52:07,707 INFO sqlalchemy.engine.Engine PRAGMA temp.table_info("audit_logs")
+2026-06-26 00:52:07,707 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-06-26 00:52:07,707 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("sla_rules")
+2026-06-26 00:52:07,707 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-06-26 00:52:07,708 INFO sqlalchemy.engine.Engine PRAGMA temp.table_info("sla_rules")
+2026-06-26 00:52:07,708 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-06-26 00:52:07,708 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("schema_registry")
+2026-06-26 00:52:07,708 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-06-26 00:52:07,708 INFO sqlalchemy.engine.Engine PRAGMA temp.table_info("schema_registry")
+2026-06-26 00:52:07,708 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-06-26 00:52:07,710 INFO sqlalchemy.engine.Engine 
+CREATE TABLE court_sessions (
+	session_id VARCHAR NOT NULL, 
+	business_objective TEXT NOT NULL, 
+	court_record JSON, 
+	architect_done BOOLEAN, 
+	security_done BOOLEAN, 
+	efficiency_done BOOLEAN, 
+	compliance_done BOOLEAN, 
+	session_status VARCHAR, 
+	created_at DATETIME, 
+	resolved_at DATETIME, 
+	error_message TEXT, 
+	PRIMARY KEY (session_id)
+)
+
+
+2026-06-26 00:52:07,710 INFO sqlalchemy.engine.Engine [no key 0.00013s] ()
+2026-06-26 00:52:07,715 INFO sqlalchemy.engine.Engine 
+CREATE TABLE cases (
+	case_id VARCHAR NOT NULL, 
+	title VARCHAR NOT NULL, 
+	business_objective TEXT NOT NULL, 
+	status VARCHAR, 
+	court_session_id VARCHAR, 
+	compiled_workflow JSON, 
+	checkpoint JSON, 
+	current_node_id VARCHAR, 
+	trc_attempt_number INTEGER, 
+	rejected_patches JSON, 
+	sla_deadline DATETIME, 
+	amendments JSON, 
+	created_at DATETIME, 
+	updated_at DATETIME, 
+	PRIMARY KEY (case_id)
+)
+
+
+2026-06-26 00:52:07,715 INFO sqlalchemy.engine.Engine [no key 0.00013s] ()
+2026-06-26 00:52:07,717 INFO sqlalchemy.engine.Engine 
+CREATE TABLE audit_logs (
+	log_id VARCHAR NOT NULL, 
+	case_id VARCHAR NOT NULL, 
+	sequence_number INTEGER NOT NULL, 
+	event_type VARCHAR NOT NULL, 
+	triggered_by VARCHAR NOT NULL, 
+	node_id VARCHAR, 
+	event_payload JSON, 
+	event_timestamp DATETIME, 
+	PRIMARY KEY (log_id)
+)
+
+
+2026-06-26 00:52:07,717 INFO sqlalchemy.engine.Engine [no key 0.00009s] ()
+2026-06-26 00:52:07,718 INFO sqlalchemy.engine.Engine CREATE INDEX ix_audit_logs_case_id ON audit_logs (case_id)
+2026-06-26 00:52:07,718 INFO sqlalchemy.engine.Engine [no key 0.00008s] ()
+2026-06-26 00:52:07,720 INFO sqlalchemy.engine.Engine 
+CREATE TABLE sla_rules (
+	rule_id VARCHAR NOT NULL, 
+	case_id VARCHAR NOT NULL, 
+	rule_type VARCHAR NOT NULL, 
+	threshold_minutes INTEGER NOT NULL, 
+	escalation_contact VARCHAR, 
+	triggered BOOLEAN, 
+	triggered_at DATETIME, 
+	PRIMARY KEY (rule_id)
+)
+
+
+2026-06-26 00:52:07,720 INFO sqlalchemy.engine.Engine [no key 0.00020s] ()
+2026-06-26 00:52:07,722 INFO sqlalchemy.engine.Engine CREATE INDEX ix_sla_rules_case_id ON sla_rules (case_id)
+2026-06-26 00:52:07,722 INFO sqlalchemy.engine.Engine [no key 0.00012s] ()
+2026-06-26 00:52:07,724 INFO sqlalchemy.engine.Engine 
+CREATE TABLE schema_registry (
+	entry_id VARCHAR NOT NULL, 
+	endpoint_pattern VARCHAR NOT NULL, 
+	service_name VARCHAR NOT NULL, 
+	schema_version VARCHAR NOT NULL, 
+	parameter_schema JSON NOT NULL, 
+	registered_at DATETIME, 
+	PRIMARY KEY (entry_id), 
+	UNIQUE (endpoint_pattern)
+)
+
+
+2026-06-26 00:52:07,724 INFO sqlalchemy.engine.Engine [no key 0.00042s] ()
+2026-06-26 00:52:07,726 INFO sqlalchemy.engine.Engine COMMIT
+[SchemaRegistry] Loaded dict_keys(['http://localhost:8000/mock-erp/payments/post', 'http://localhost:8000/mock-erp/invoices/validate']) (Agent) and dict_keys(['http://localhost:8000/mock-erp/payments/post', 'http://localhost:8000/mock-erp/invoices/validate']) (Production)
+[SLA Monitor] Started.
+2026-06-26 00:55:30,757 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-06-26 00:55:30,767 INFO sqlalchemy.engine.Engine SELECT cases.case_id, cases.title, cases.business_objective, cases.status, cases.court_session_id, cases.compiled_workflow, cases.checkpoint, cases.current_node_id, cases.trc_attempt_number, cases.rejected_patches, cases.sla_deadline, cases.amendments, cases.created_at, cases.updated_at 
+FROM cases 
+WHERE cases.status IN (?, ?, ?)
+2026-06-26 00:55:30,768 INFO sqlalchemy.engine.Engine [generated in 0.00050s] ('EXECUTING', 'PAUSED', 'AWAITING_HUMAN')
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+2026-06-26 00:55:30,770 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-06-26 00:56:30,773 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-06-26 00:56:30,775 INFO sqlalchemy.engine.Engine SELECT cases.case_id, cases.title, cases.business_objective, cases.status, cases.court_session_id, cases.compiled_workflow, cases.checkpoint, cases.current_node_id, cases.trc_attempt_number, cases.rejected_patches, cases.sla_deadline, cases.amendments, cases.created_at, cases.updated_at 
+FROM cases 
+WHERE cases.status IN (?, ?, ?)
+2026-06-26 00:56:30,775 INFO sqlalchemy.engine.Engine [cached since 60.01s ago] ('EXECUTING', 'PAUSED', 'AWAITING_HUMAN')
+2026-06-26 00:56:30,776 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-06-26 00:57:30,779 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-06-26 00:57:30,780 INFO sqlalchemy.engine.Engine SELECT cases.case_id, cases.title, cases.business_objective, cases.status, cases.court_session_id, cases.compiled_workflow, cases.checkpoint, cases.current_node_id, cases.trc_attempt_number, cases.rejected_patches, cases.sla_deadline, cases.amendments, cases.created_at, cases.updated_at 
+FROM cases 
+WHERE cases.status IN (?, ?, ?)
+2026-06-26 00:57:30,780 INFO sqlalchemy.engine.Engine [cached since 120s ago] ('EXECUTING', 'PAUSED', 'AWAITING_HUMAN')
+2026-06-26 00:57:30,782 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-06-26 00:58:30,783 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-06-26 00:58:30,784 INFO sqlalchemy.engine.Engine SELECT cases.case_id, cases.title, cases.business_objective, cases.status, cases.court_session_id, cases.compiled_workflow, cases.checkpoint, cases.current_node_id, cases.trc_attempt_number, cases.rejected_patches, cases.sla_deadline, cases.amendments, cases.created_at, cases.updated_at 
+FROM cases 
+WHERE cases.status IN (?, ?, ?)
+2026-06-26 00:58:30,784 INFO sqlalchemy.engine.Engine [cached since 180s ago] ('EXECUTING', 'PAUSED', 'AWAITING_HUMAN')
+2026-06-26 00:58:30,785 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-06-26 00:59:30,788 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-06-26 00:59:30,791 INFO sqlalchemy.engine.Engine SELECT cases.case_id, cases.title, cases.business_objective, cases.status, cases.court_session_id, cases.compiled_workflow, cases.checkpoint, cases.current_node_id, cases.trc_attempt_number, cases.rejected_patches, cases.sla_deadline, cases.amendments, cases.created_at, cases.updated_at 
+FROM cases 
+WHERE cases.status IN (?, ?, ?)
+2026-06-26 00:59:30,791 INFO sqlalchemy.engine.Engine [cached since 240s ago] ('EXECUTING', 'PAUSED', 'AWAITING_HUMAN')
+2026-06-26 00:59:30,794 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-06-26 01:00:30,805 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-06-26 01:00:30,808 INFO sqlalchemy.engine.Engine SELECT cases.case_id, cases.title, cases.business_objective, cases.status, cases.court_session_id, cases.compiled_workflow, cases.checkpoint, cases.current_node_id, cases.trc_attempt_number, cases.rejected_patches, cases.sla_deadline, cases.amendments, cases.created_at, cases.updated_at 
+FROM cases 
+WHERE cases.status IN (?, ?, ?)
+2026-06-26 01:00:30,808 INFO sqlalchemy.engine.Engine [cached since 300.1s ago] ('EXECUTING', 'PAUSED', 'AWAITING_HUMAN')
+2026-06-26 01:00:30,809 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-06-26 01:01:30,816 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-06-26 01:01:30,819 INFO sqlalchemy.engine.Engine SELECT cases.case_id, cases.title, cases.business_objective, cases.status, cases.court_session_id, cases.compiled_workflow, cases.checkpoint, cases.current_node_id, cases.trc_attempt_number, cases.rejected_patches, cases.sla_deadline, cases.amendments, cases.created_at, cases.updated_at 
+FROM cases 
+WHERE cases.status IN (?, ?, ?)
+2026-06-26 01:01:30,819 INFO sqlalchemy.engine.Engine [cached since 360.1s ago] ('EXECUTING', 'PAUSED', 'AWAITING_HUMAN')
+2026-06-26 01:01:30,822 INFO sqlalchemy.engine.Engine ROLLBACK
+INFO:     127.0.0.1:58205 - "GET /health HTTP/1.1" 200 OK

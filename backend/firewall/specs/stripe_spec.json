@@ -1,0 +1,44 @@
+{
+  "service": "stripe",
+  "version": "2024-06-20",
+  "endpoints": {
+    "https://api.stripe.com/v1/charges": {
+      "method": "POST",
+      "required": ["amount", "currency", "source"],
+      "optional": ["description", "metadata", "capture", "customer"],
+      "properties": {
+        "amount": {"type": "integer", "description": "Amount in smallest currency unit (paise for INR)"},
+        "currency": {"type": "string", "enum": ["inr", "usd", "eur", "gbp"]},
+        "source": {"type": "string", "description": "Payment source token"},
+        "description": {"type": "string"},
+        "metadata": {"type": "object"},
+        "capture": {"type": "boolean"},
+        "customer": {"type": "string"}
+      }
+    },
+    "https://api.stripe.com/v1/payment_intents": {
+      "method": "POST",
+      "required": ["amount", "currency"],
+      "optional": ["description", "metadata", "payment_method_types", "customer"],
+      "properties": {
+        "amount": {"type": "integer"},
+        "currency": {"type": "string"},
+        "description": {"type": "string"},
+        "metadata": {"type": "object"},
+        "payment_method_types": {"type": "array"},
+        "customer": {"type": "string"}
+      }
+    },
+    "https://api.stripe.com/v1/refunds": {
+      "method": "POST",
+      "required": ["charge"],
+      "optional": ["amount", "reason", "metadata"],
+      "properties": {
+        "charge": {"type": "string"},
+        "amount": {"type": "integer"},
+        "reason": {"type": "string", "enum": ["duplicate", "fraudulent", "requested_by_customer"]},
+        "metadata": {"type": "object"}
+      }
+    }
+  }
+}

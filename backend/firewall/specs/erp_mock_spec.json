@@ -1,0 +1,59 @@
+{
+  "service": "erp_mock",
+  "version": "2024-01-01",
+  "description": "Mock ERP API for vendor invoice processing demo",
+  "endpoints": {
+    "https://erp.internal/api/v1/invoices/validate": {
+      "method": "POST",
+      "required": ["invoice_number", "vendor_gstin", "amount"],
+      "optional": ["invoice_date", "hsn_code", "gst_rate"],
+      "properties": {
+        "invoice_number": {"type": "string", "description": "Invoice reference number e.g. INV-2024-7821"},
+        "vendor_gstin": {"type": "string", "description": "15-char GST Identification Number"},
+        "amount": {"type": "number", "description": "Invoice amount in INR"},
+        "invoice_date": {"type": "string", "description": "ISO date string"},
+        "hsn_code": {"type": "string", "description": "HSN/SAC code"},
+        "gst_rate": {"type": "number", "description": "GST rate percentage: 5, 12, 18, or 28"}
+      }
+    },
+    "https://erp.internal/api/v1/vendors/verify": {
+      "method": "POST",
+      "required": ["vendor_id", "vendor_gstin"],
+      "optional": ["pan_number", "bank_account", "ifsc_code"],
+      "properties": {
+        "vendor_id": {"type": "string"},
+        "vendor_gstin": {"type": "string"},
+        "pan_number": {"type": "string", "description": "10-char PAN"},
+        "bank_account": {"type": "string"},
+        "ifsc_code": {"type": "string", "description": "11-char IFSC code e.g. HDFC0001234"}
+      }
+    },
+    "https://erp.internal/api/v1/payments/post": {
+      "method": "POST",
+      "required": ["invoice_number", "vendor_id", "amount", "ifsc_code", "account_number"],
+      "optional": ["narration", "payment_mode", "tds_amount"],
+      "properties": {
+        "invoice_number": {"type": "string"},
+        "vendor_id": {"type": "string"},
+        "amount": {"type": "number"},
+        "ifsc_code": {"type": "string"},
+        "account_number": {"type": "string"},
+        "narration": {"type": "string"},
+        "payment_mode": {"type": "string", "enum": ["NEFT", "RTGS", "IMPS", "UPI"]},
+        "tds_amount": {"type": "number"}
+      }
+    },
+    "https://erp.internal/api/v1/tds/deduct": {
+      "method": "POST",
+      "required": ["vendor_pan", "gross_amount", "tds_section", "tds_rate"],
+      "optional": ["deduction_date"],
+      "properties": {
+        "vendor_pan": {"type": "string"},
+        "gross_amount": {"type": "number"},
+        "tds_section": {"type": "string", "enum": ["194C", "194J", "194I", "194H"]},
+        "tds_rate": {"type": "number"},
+        "deduction_date": {"type": "string"}
+      }
+    }
+  }
+}
