@@ -112,7 +112,7 @@ async def approve_trc_patch(case_id: str, db: AsyncSession = Depends(get_db)):
     nodes = compiled.get("nodes", [])
     patch_type = patch.get("patch_type", "")
     
-    if patch_type == "REPLACE_NODE" and new_nodes:
+    if patch_type in ("REPLACE_NODE", "MODIFY_PARAMETERS") and new_nodes:
         # Replace the failed node in place, preserving its ID so dependencies and guards still work
         new_node = new_nodes[0]
         new_node["node_id"] = failed_id
@@ -123,8 +123,12 @@ async def approve_trc_patch(case_id: str, db: AsyncSession = Depends(get_db)):
     else:
         # Insert mode
         existing_ids = {n["node_id"] for n in nodes}
+        existing_labels = {n.get("label") for n in nodes}
         for node in new_nodes:
             if node["node_id"] not in existing_ids:
+                # Prevent inserting duplicate ADD_VALIDATION_STEP nodes
+                if patch_type == "ADD_VALIDATION_STEP" and node.get("label") in existing_labels:
+                    continue
                 insert_idx = next(
                     (i for i, n in enumerate(nodes) if n["node_id"] == failed_id),
                     len(nodes)
@@ -132,7 +136,16 @@ async def approve_trc_patch(case_id: str, db: AsyncSession = Depends(get_db)):
                 nodes.insert(insert_idx, node)
 
     # Clear the failing node's firewall block by adjusting checkpoint
-    checkpoint["completed_nodes"] = checkpoint.get("completed_nodes", [])
+    completed_nodes = checkpoint.get("completed_nodes", [])
+    
+    # If MODIFY_PARAMETERS or REPLACE_NODE, we must re-run the FIREWALL_GATE that guards this node
+    if patch_type in ("REPLACE_NODE", "MODIFY_PARAMETERS"):
+        firewall_node = next((n for n in nodes if n.get("node_type") == "FIREWALL_GATE" and n.get("guards") == failed_id), None)
+        if firewall_node and firewall_node["node_id"] in completed_nodes:
+            completed_nodes.remove(firewall_node["node_id"])
+            checkpoint["current_node_id"] = firewall_node["node_id"]
+
+    checkpoint["completed_nodes"] = completed_nodes
     checkpoint.pop("failure_node_id", None)
     checkpoint.pop("violation_report", None)
     checkpoint.pop("trc_result", None)
@@ -153,6 +166,7 @@ async def approve_trc_patch(case_id: str, db: AsyncSession = Depends(get_db)):
             checkpoint=checkpoint,
             status="RESUMING",
             amendments=amendments,
+            trc_attempt_number=0,
         )
     )
     await db.commit()
