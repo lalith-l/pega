@@ -191,8 +191,15 @@ async def execute_case(case_id: str):
             # ── Firewall check for API_CALL nodes ────────────────────────
             if node_type == "FIREWALL_GATE":
                 target_node_id = node.get("guards")
-                target_node = next((n for n in nodes if n["node_id"] == target_node_id), {})
                 
+                # ALWAYS fetch the target node fresh from SQLite so we don't use a stale in-memory cached version
+                async with AsyncSessionLocal() as db:
+                    fresh_case = await _get_case(db, case_id)
+                    fresh_nodes = fresh_case.compiled_workflow.get("nodes", []) if fresh_case and fresh_case.compiled_workflow else nodes
+                    target_node = next((n for n in fresh_nodes if n["node_id"] == target_node_id), {})
+                
+                print(f"🔥 [DEBUG-FIREWALL] Validating node_id: {target_node_id} with declared_parameters: {target_node.get('declared_parameters')}")
+
                 intent = _build_intent_declaration(node, target_node, case_id)
 
                 async with AsyncSessionLocal() as db:

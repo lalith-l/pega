@@ -105,7 +105,8 @@ async def approve_trc_patch(case_id: str, db: AsyncSession = Depends(get_db)):
 
     patch = trc_result.get("patch", {})
     new_nodes = patch.get("new_nodes", [])
-    compiled = case.compiled_workflow or {"nodes": []}
+    import copy
+    compiled = copy.deepcopy(case.compiled_workflow) if case.compiled_workflow else {"nodes": []}
 
     # Apply patch
     failed_id = trc_result["autopsy"]["failure_node_id"]
@@ -144,11 +145,18 @@ async def approve_trc_patch(case_id: str, db: AsyncSession = Depends(get_db)):
         if firewall_node and firewall_node["node_id"] in completed_nodes:
             completed_nodes.remove(firewall_node["node_id"])
             checkpoint["current_node_id"] = firewall_node["node_id"]
+            print(f"✅ [PATCH] Execution will resume from FIREWALL_GATE node: {firewall_node['node_id']} (guards {failed_id})")
 
     checkpoint["completed_nodes"] = completed_nodes
     checkpoint.pop("failure_node_id", None)
     checkpoint.pop("violation_report", None)
     checkpoint.pop("trc_result", None)
+
+    # ── VERIFICATION PRINT ──────────────────────────────────────────────
+    if patch_type == "MODIFY_PARAMETERS":
+        erp_node = next((n for n in nodes if n["node_id"] == failed_id), {})
+        print(f"✅ [VERIFICATION] ERP Payment Posting declared_parameters in SQLite: {erp_node.get('declared_parameters')}")
+    # ────────────────────────────────────────────────────────────────────
 
     # Record amendment
     amendments = case.amendments or []
