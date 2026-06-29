@@ -108,11 +108,11 @@ async def phase2_causal_chain(case_id: str, autopsy: dict) -> dict:
     try:
         await neo4j_service.create_causal_graph(case_id, failed_node_id)
     except Exception as e:
-        print(f"[TRC] ⚠️ Failed to create causal graph: {e}")
+        pass
         
-    chain_data = await neo4j_service.get_causal_chain(case_id, failed_node_id)
+    chain_data = await neo4j_service.get_causal_chain_path(case_id, failed_node_id)
     path_nodes = chain_data.get("path_nodes", [])
-    flagged = chain_data.get("flagged_warnings", [])
+    flagged = []
 
     # LLM narrative
     system_prompt = """You are the TRC Causal Chain Reconstructor.
@@ -145,11 +145,11 @@ Reconstruct the causal chain narrative."""
         
     narrative = {
         "causal_narrative": narrative_str,
-        "root_node_id": path_nodes[0]["node_id"] if path_nodes else failed_node_id,
+        "root_node_id": path_nodes[0].get("node_id", failed_node_id) if path_nodes else failed_node_id,
         "chain_length": len(path_nodes) if path_nodes else 1,
-        "key_decision_points": [failed_node_id]
+        "key_decision_points": [failed_node_id],
+        "path_nodes": path_nodes
     }
-    narrative["path_node_ids"] = [n["node_id"] for n in path_nodes]
     narrative["flagged_warnings"] = flagged
     return narrative
 
@@ -323,6 +323,13 @@ async def run_trc_pipeline(case_id: str, failed_node_id: str, violation_report: 
 
         # ── Phase 1 ─────────────────────────────────────────────────────────
         autopsy = await phase1_autopsy(case_id, failed_node_id, violation_report)
+        
+        # Write partial checkpoint
+        case_now = await _get_case(case_id)
+        cp = case_now.get("checkpoint") or {}
+        cp["trc_autopsy"] = autopsy
+        await _update_case(case_id, {"checkpoint": cp})
+
         await sse_manager.publish(case_id, "TRC_PHASE", {
             "phase": 1, "name": "Self Autopsy", "status": "DONE", "result": autopsy
         })
@@ -336,6 +343,13 @@ async def run_trc_pipeline(case_id: str, failed_node_id: str, violation_report: 
             "phase": 2, "name": "Causal Chain", "status": "RUNNING"
         })
         causal_chain = await phase2_causal_chain(case_id, autopsy)
+        
+        # Write partial checkpoint
+        case_now = await _get_case(case_id)
+        cp = case_now.get("checkpoint") or {}
+        cp["trc_causal_chain"] = causal_chain
+        await _update_case(case_id, {"checkpoint": cp})
+
         await sse_manager.publish(case_id, "TRC_PHASE", {
             "phase": 2, "name": "Causal Chain", "status": "DONE",
             "result": causal_chain,
@@ -352,6 +366,13 @@ async def run_trc_pipeline(case_id: str, failed_node_id: str, violation_report: 
         })
         rejected = case.get("rejected_patches", [])
         patch = await phase3_patch_proposal(case_id, autopsy, causal_chain, attempt, rejected)
+        
+        # Write partial checkpoint
+        case_now = await _get_case(case_id)
+        cp = case_now.get("checkpoint") or {}
+        cp["trc_patch"] = patch
+        await _update_case(case_id, {"checkpoint": cp})
+
         await sse_manager.publish(case_id, "TRC_PHASE", {
             "phase": 3, "name": "Patch Proposal", "status": "DONE", "result": patch
         })
@@ -365,6 +386,13 @@ async def run_trc_pipeline(case_id: str, failed_node_id: str, violation_report: 
             "phase": 4, "name": "Mini-Court Review", "status": "RUNNING"
         })
         court_verdict = await phase4_mini_court(case_id, patch, autopsy, causal_chain)
+        
+        # Write partial checkpoint
+        case_now = await _get_case(case_id)
+        cp = case_now.get("checkpoint") or {}
+        cp["trc_court_verdict"] = court_verdict
+        await _update_case(case_id, {"checkpoint": cp})
+
         await sse_manager.publish(case_id, "TRC_PHASE", {
             "phase": 4, "name": "Mini-Court Review", "status": "DONE", "result": court_verdict
         })

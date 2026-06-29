@@ -40,6 +40,8 @@ class CourtSession(Base):
 
     # "CONVENING" | "DEBATING" | "AWAITING_HUMAN" | "RESOLVED" | "COMPILED"
     session_status = Column(String, default="CONVENING")
+    
+    causal_node_ids = Column(JSON, default=dict)
 
     created_at = Column(DateTime, default=_now)
     resolved_at = Column(DateTime, nullable=True)

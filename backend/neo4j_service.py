@@ -493,5 +493,83 @@ class Neo4jService:
                 reasoning=reasoning, is_override=is_human_override
             )
 
+    # ─── Causal Chain Tracking ───────────────────────────────────────────
+    async def write_causal_node(self, case_id: str, target_node_id: str, label: str, properties: dict, link_from_internal_id: int = None) -> int:
+        """Write a CausalNode and optionally link it to a previous internal node ID. Returns the new internal node ID."""
+        try:
+            driver = get_neo4j_driver()
+            async with driver.session() as session:
+                props_cypher = ", ".join([f"{k}: ${k}" for k in properties.keys()])
+                if props_cypher:
+                    props_cypher = ", " + props_cypher
+
+                result = await session.run(
+                    f"""
+                    CREATE (n:CausalNode {{
+                        case_id: $case_id,
+                        target_node_id: $target_node_id,
+                        label: $label,
+                        created_at: timestamp()
+                        {props_cypher}
+                    }})
+                    RETURN id(n) AS node_id
+                    """,
+                    case_id=case_id, target_node_id=target_node_id, label=label, **properties
+                )
+                record = await result.single()
+                new_id = record["node_id"]
+
+                if link_from_internal_id is not None:
+                    await session.run(
+                        """
+                        MATCH (prev:CausalNode) WHERE id(prev) = $prev_id
+                        MATCH (curr:CausalNode) WHERE id(curr) = $curr_id
+                        CREATE (prev)-[:CAUSED]->(curr)
+                        """,
+                        prev_id=link_from_internal_id, curr_id=new_id
+                    )
+                return new_id
+        except Exception as e:
+            print(f"[Neo4jService] ⚠️ Silently failed to write causal node '{label}' for case {case_id}: {e}")
+            return None
+
+    async def get_causal_chain_path(self, case_id: str, failed_target_node_id: str) -> dict:
+        """Find the most recent failure node for the target_node_id, and trace path from root."""
+        driver = get_neo4j_driver()
+        async with driver.session() as session:
+            # First find the most recent failure node's internal ID
+            result = await session.run(
+                """
+                MATCH (fail:CausalNode {case_id: $case_id, target_node_id: $target_node_id, is_failure: true})
+                RETURN id(fail) AS fail_id
+                ORDER BY fail.created_at DESC LIMIT 1
+                """,
+                case_id=case_id, target_node_id=failed_target_node_id
+            )
+            record = await result.single()
+            if not record:
+                return {"path_nodes": []}
+            fail_id = record["fail_id"]
+
+            # Then run shortestPath
+            path_res = await session.run(
+                """
+                MATCH p = shortestPath(
+                    (root:CausalNode {case_id: $case_id, is_root: true})-[:CAUSED*]->(fail:CausalNode)
+                )
+                WHERE id(fail) = $fail_id
+                RETURN nodes(p) AS path_nodes
+                """,
+                case_id=case_id, fail_id=fail_id
+            )
+            path_record = await path_res.single()
+            if not path_record:
+                return {"path_nodes": []}
+            
+            nodes = []
+            for n in path_record["path_nodes"]:
+                nodes.append(dict(n))
+            return {"path_nodes": nodes}
+
 
 neo4j_service = Neo4jService()

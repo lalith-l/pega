@@ -239,6 +239,23 @@ async def _do_compile(session_id: str, db: AsyncSession):
     except CompilationError as e:
         raise HTTPException(400, f"Compilation failed: {e}")
 
+    # Write Compiler Embedding CausalNodes
+    from neo4j_service import neo4j_service
+    causal_node_ids = session.causal_node_ids or {}
+    new_causal_ids = dict(causal_node_ids)
+    
+    for node in active_nodes:
+        if node.get("node_type") == "API_CALL":
+            nid = node.get("node_id")
+            prev_cid = causal_node_ids.get(nid)
+            if prev_cid:
+                cid = await neo4j_service.write_causal_node(
+                    case.case_id, nid, "Compiler Parameter Embedding",
+                    {}, link_from_internal_id=prev_cid
+                )
+                if cid:
+                    new_causal_ids[nid] = cid
+                
     # Save compiled workflow
     await db.execute(
         update(Case)
@@ -248,7 +265,7 @@ async def _do_compile(session_id: str, db: AsyncSession):
     await db.execute(
         update(CourtSession)
         .where(CourtSession.session_id == session_id)
-        .values(session_status="COMPILED", resolved_at=datetime.utcnow())
+        .values(session_status="COMPILED", resolved_at=datetime.utcnow(), causal_node_ids=new_causal_ids)
     )
     await db.commit()
 

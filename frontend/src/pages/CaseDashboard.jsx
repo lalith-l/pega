@@ -173,7 +173,12 @@ function CaseDashboard() {
   const [activeNodeId, setActiveNodeId] = useState(null);
   const [completedNodes, setCompletedNodes] = useState([]);
   const [firewallViolation, setFirewallViolation] = useState(null);
-  const [trcPhases, setTrcPhases] = useState([]);
+  const [trcPhases, setTrcPhases] = useState([
+    { phase: 1, name: 'Self Autopsy', status: 'WAITING', result: null },
+    { phase: 2, name: 'Causal Chain Reconstruction', status: 'WAITING', result: null },
+    { phase: 3, name: 'Architectural Patch Proposal', status: 'WAITING', result: null },
+    { phase: 4, name: 'Mini-Court Review', status: 'WAITING', result: null },
+  ]);
   const [trcResult, setTrcResult] = useState(null);
   
   // ADG States
@@ -266,6 +271,46 @@ function CaseDashboard() {
     return () => clearInterval(pollRef.current);
   }, [sessionId, caseData, buildGraph]);
 
+  /* TRC Polling Safety Net */
+  useEffect(() => {
+    if (caseData?.status !== 'AWAITING_HUMAN') return;
+    const pollTRC = async () => {
+      try {
+        const data = await api.getCase(caseId);
+        if (data?.checkpoint) {
+          const cp = data.checkpoint;
+          
+          if (cp.trc_result) setTrcResult(cp.trc_result);
+          
+          setTrcPhases(prev => {
+            const copy = [...prev];
+            const updatePhase = (id, resultKey) => {
+              if (cp[resultKey]) {
+                 const idx = copy.findIndex(p => p.phase === id);
+                 if (idx >= 0) {
+                   copy[idx] = { ...copy[idx], status: 'DONE', result: cp[resultKey] };
+                 }
+              }
+            };
+            updatePhase(1, 'trc_autopsy');
+            updatePhase(2, 'trc_causal_chain');
+            updatePhase(3, 'trc_patch');
+            updatePhase(4, 'trc_court_verdict');
+            return copy;
+          });
+        }
+      } catch (e) {
+        console.error("TRC poll error", e);
+      }
+    };
+    
+    // Check every 5 seconds
+    const timer = setInterval(pollTRC, 5000);
+    pollTRC();
+    
+    return () => clearInterval(timer);
+  }, [caseId, caseData?.status]);
+
   /* Live update execution graph visually */
   const updateGraphState = useCallback((currentId, completedId, blockedId, trcHighlightIds) => {
     setNodes((prev) => prev.map((n) => {
@@ -304,10 +349,20 @@ function CaseDashboard() {
         case 'TRC_PHASE':
           setTrcPhases((prev) => {
             const copy = [...prev];
-            const existingIdx = copy.findIndex(p => p.phase === event.payload.phase);
-            if (existingIdx >= 0) copy[existingIdx] = event.payload;
-            else copy.push(event.payload);
-            return copy.sort((a, b) => a.phase - b.phase);
+            const pLoad = event?.payload;
+            if (!pLoad || !pLoad.phase) return copy;
+            
+            const existingIdx = copy.findIndex(p => p.phase === pLoad.phase);
+            if (existingIdx >= 0) {
+              const old = copy[existingIdx];
+              copy[existingIdx] = {
+                ...old,
+                name: pLoad.name || old.name,
+                status: pLoad.status || old.status,
+                result: pLoad.result || old.result
+              };
+            }
+            return copy;
           });
           if (event.payload.highlight_nodes) {
             updateGraphState(null, null, null, event.payload.highlight_nodes);
@@ -335,7 +390,12 @@ function CaseDashboard() {
         case 'PATCH_APPROVED':
           setTrcResult(null);
           setFirewallViolation(null);
-          setTrcPhases([]);
+          setTrcPhases([
+            { phase: 1, name: 'Self Autopsy', status: 'WAITING', result: null },
+            { phase: 2, name: 'Causal Chain Reconstruction', status: 'WAITING', result: null },
+            { phase: 3, name: 'Architectural Patch Proposal', status: 'WAITING', result: null },
+            { phase: 4, name: 'Mini-Court Review', status: 'WAITING', result: null },
+          ]);
           api.getCase(caseId).then((data) => {
             setCaseData(data);
             buildGraph(data.compiled_workflow?.nodes, false, null, data.checkpoint);
@@ -543,8 +603,8 @@ function CaseDashboard() {
                 </div>
               </div>
               <div className="code-block" style={{ borderColor: 'rgba(239,68,68,0.3)', color: '#fca5a5', whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontFamily: 'monospace', background: 'rgba(0,0,0,0.4)', padding: 14, borderRadius: 6 }}>
-                Violation: {firewallViolation.violation_type} (Layer {firewallViolation.layer})<br /><br />
-                {JSON.stringify(firewallViolation.details, null, 2)}
+                Violation: {firewallViolation?.violation_type} (Layer {firewallViolation?.layer})<br /><br />
+                {JSON.stringify(firewallViolation?.details, null, 2)}
               </div>
             </div>
           )}
@@ -567,13 +627,13 @@ function CaseDashboard() {
               <div className="card" style={{ padding: 16, marginBottom: 16, background: 'var(--bg-base)' }}>
                 <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>LLM Proposed Decision</div>
                 <div style={{ fontSize: 13, marginBottom: 4 }}>
-                  <span style={{ color: 'var(--text-muted)' }}>Branch:</span> <span style={{ fontWeight: 700, color: 'var(--green-500)' }}>{adgDecision.decision.selected_branch}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Branch:</span> <span style={{ fontWeight: 700, color: 'var(--green-500)' }}>{adgDecision?.decision?.selected_branch}</span>
                 </div>
                 <div style={{ fontSize: 13, marginBottom: 4 }}>
-                  <span style={{ color: 'var(--text-muted)' }}>Confidence:</span> {adgDecision.decision.confidence}%
+                  <span style={{ color: 'var(--text-muted)' }}>Confidence:</span> {adgDecision?.decision?.confidence}%
                 </div>
                 <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>Reasoning:</span> {adgDecision.decision.reasoning}
+                  <span style={{ color: 'var(--text-muted)' }}>Reasoning:</span> {adgDecision?.decision?.reasoning}
                 </div>
               </div>
 
@@ -630,10 +690,10 @@ function CaseDashboard() {
                         <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' }}>{phase.name}</div>
                         {state?.result && (
                           <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
-                            {phase.id === 1 && state.result.preliminary_root_cause}
-                            {phase.id === 2 && state.result.causal_narrative}
-                            {phase.id === 3 && `Proposed: ${state.result.patch_type}`}
-                            {phase.id === 4 && `Verdict: ${state.result.court_verdict}`}
+                            {phase.id === 1 && state?.result?.preliminary_root_cause}
+                            {phase.id === 2 && state?.result?.causal_narrative}
+                            {phase.id === 3 && `Proposed: ${state?.result?.patch_type}`}
+                            {phase.id === 4 && `Verdict: ${state?.result?.court_verdict}`}
                           </div>
                         )}
                       </div>
@@ -649,7 +709,7 @@ function CaseDashboard() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
                 <div style={{ fontSize: 24 }}>🧠</div>
                 <div>
-                  <div style={{ fontWeight: 800, fontSize: 16, color: 'var(--purple-400)' }}>TRC Patch Proposed (Attempt #{trcResult.attempt_number})</div>
+                  <div style={{ fontWeight: 800, fontSize: 16, color: 'var(--purple-400)' }}>TRC Patch Proposed (Attempt #{trcResult?.attempt_number})</div>
                   <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Human approval required to apply patch and resume execution.</div>
                 </div>
               </div>
@@ -658,28 +718,51 @@ function CaseDashboard() {
                 <div>
                   <div className="section-title">Autopsy Result</div>
                   <div className="code-block" style={{ marginBottom: 12 }}>
-                    <span style={{ color: '#fca5a5' }}>Failure: </span>{trcResult.autopsy.failure_type}<br />
-                    <span style={{ color: '#86efac' }}>Root Cause: </span>{trcResult.autopsy.preliminary_root_cause}
+                    <span style={{ color: '#fca5a5' }}>Failure: </span>{trcResult?.autopsy?.failure_type}<br />
+                    <span style={{ color: '#86efac' }}>Root Cause: </span>{trcResult?.autopsy?.preliminary_root_cause}
                   </div>
                   <div className="section-title">Causal Chain Narrative</div>
-                  <div style={{ fontSize: 13, color: 'var(--text-secondary)', background: 'var(--bg-base)', padding: 12, borderRadius: 'var(--radius-sm)' }}>
-                    {trcResult.causal_chain.causal_narrative}
-                  </div>
+                  {trcResult?.causal_chain?.path_nodes?.length > 0 ? (
+                    <div style={{ display: 'flex', alignItems: 'center', overflowX: 'auto', gap: 8, padding: 12, background: 'var(--bg-base)', borderRadius: 'var(--radius-sm)' }}>
+                      {trcResult.causal_chain.path_nodes.map((n, i, arr) => (
+                        <React.Fragment key={i}>
+                          <div style={{ padding: 12, borderRadius: 8, background: n?.is_failure ? 'rgba(239,68,68,0.1)' : 'var(--bg-elevated)', border: `1px solid ${n?.is_failure ? '#ef4444' : 'var(--border)'}`, minWidth: 150 }}>
+                            <div style={{ fontWeight: 700, fontSize: 13, color: n?.is_failure ? '#ef4444' : 'var(--text-primary)' }}>{n?.label}</div>
+                            <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                               {n?.schema_version && `Schema: ${n.schema_version}`}
+                               {n?.declared_params_v21 && (
+                                 <div style={{ marginTop: 4 }}>
+                                   <div style={{ color: '#ef4444' }}>Decl: {n.declared_params_v21}</div>
+                                   <div style={{ color: '#10b981' }}>Exp: {n.expected_params_v24}</div>
+                                 </div>
+                               )}
+                               {n?.failed_param && `Failed: ${n.failed_param}`}
+                            </div>
+                          </div>
+                          {i < arr.length - 1 && <div style={{ color: 'var(--text-muted)' }}>→</div>}
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 13, color: 'var(--text-secondary)', background: 'var(--bg-base)', padding: 12, borderRadius: 'var(--radius-sm)' }}>
+                      {trcResult?.causal_chain?.causal_narrative}
+                    </div>
+                  )}
                 </div>
 
                 <div>
                   <div className="section-title">Proposed Architecture Patch</div>
                   <div className="card" style={{ padding: 14, background: 'rgba(139,92,246,0.05)', borderColor: 'rgba(139,92,246,0.3)' }}>
                     <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8, color: 'var(--text-primary)' }}>
-                      Type: {trcResult.patch.patch_type}
+                      Type: {trcResult?.patch?.patch_type}
                     </div>
                     <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
-                      {trcResult.patch.patch_rationale}
+                      {trcResult?.patch?.patch_rationale}
                     </div>
-                    {trcResult.patch.new_nodes?.map((n) => (
-                      <div key={n.node_id} style={{ fontSize: 12, padding: 8, background: 'var(--bg-base)', borderRadius: 4, borderLeft: '2px solid var(--green-500)' }}>
-                        <span style={{ fontWeight: 700 }}>+ Node:</span> {n.label} ({n.node_type})<br />
-                        <span style={{ color: 'var(--text-muted)' }}>{n.description}</span>
+                    {trcResult?.patch?.new_nodes?.map((n) => (
+                      <div key={n?.node_id} style={{ fontSize: 12, padding: 8, background: 'var(--bg-base)', borderRadius: 4, borderLeft: '2px solid var(--green-500)' }}>
+                        <span style={{ fontWeight: 700 }}>+ Node:</span> {n?.label} ({n?.node_type})<br />
+                        <span style={{ color: 'var(--text-muted)' }}>{n?.description}</span>
                       </div>
                     ))}
                   </div>

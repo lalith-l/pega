@@ -15,7 +15,7 @@ from datetime import datetime
 import httpx
 from sqlalchemy import select, update
 from db import AsyncSessionLocal
-from models import Case
+from models import Case, CourtSession
 from audit import log_event
 from sse_manager import sse_manager
 from firewall.validator import validate_intent, FirewallViolation
@@ -245,9 +245,34 @@ async def execute_case(case_id: str):
                                         violation_report, node_id=target_node_id)
                         await log_event(db, case_id, "CASE_PAUSED", "FIREWALL",
                                         {"reason": "Firewall kill", "node_id": target_node_id})
+                                        
+                        # Fetch court session causal_node_ids
+                        causal_node_ids = {}
+                        res = await db.execute(select(Case).where(Case.case_id == case_id))
+                        case_record = res.scalar_one_or_none()
+                        if case_record and case_record.court_session_id:
+                            cs_res = await db.execute(select(CourtSession).where(CourtSession.session_id == case_record.court_session_id))
+                            cs = cs_res.scalar_one_or_none()
+                            if cs and cs.causal_node_ids:
+                                causal_node_ids = cs.causal_node_ids
 
                     await neo4j_service.record_execution(case_id, target_node_id, "FIREWALL_BLOCKED", None, intent)
                     await neo4j_service.record_firewall_result(case_id, target_node_id, False, violation_report)
+                    
+                    # Write CausalNode for Firewall Kill
+                    prev_cid = causal_node_ids.get(target_node_id)
+                    if prev_cid:
+                        failed_param = ""
+                        if isinstance(fv.details, dict):
+                            failed_param = fv.details.get("missing_field", fv.details.get("invalid_field", ""))
+                        elif isinstance(fv.details, str):
+                            failed_param = fv.details
+                            
+                        await neo4j_service.write_causal_node(
+                            case_id, target_node_id, "Firewall Kill",
+                            {"failed_param": str(failed_param), "is_failure": True},
+                            link_from_internal_id=prev_cid
+                        )
 
                     await sse_manager.publish(case_id, "FIREWALL_KILLED", {
                         "node_id": target_node_id,

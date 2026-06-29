@@ -21,15 +21,17 @@ function Navbar() {
   );
 }
 
+import { ErrorBoundary } from './components/ErrorBoundary';
+
 export default function App() {
   return (
     <BrowserRouter>
       <Navbar />
       <Routes>
         <Route path="/" element={<Landing />} />
-        <Route path="/court/new" element={<CaseDashboard />} />
-        <Route path="/court/:sessionId" element={<CaseDashboard />} />
-        <Route path="/cases/:caseId" element={<CaseDashboard />} />
+        <Route path="/court/new" element={<ErrorBoundary><CaseDashboard /></ErrorBoundary>} />
+        <Route path="/court/:sessionId" element={<ErrorBoundary><CaseDashboard /></ErrorBoundary>} />
+        <Route path="/cases/:caseId" element={<ErrorBoundary><CaseDashboard /></ErrorBoundary>} />
       </Routes>
     </BrowserRouter>
   );

@@ -1,7 +1,7 @@
 import asyncio
 import json
 from datetime import datetime
-from sqlalchemy import update
+from sqlalchemy import update, select
 from db import AsyncSessionLocal
 from models import CourtSession
 from agents.architect import architect_agent
@@ -95,8 +95,63 @@ async def run_court_session(session_id: str, case_id: str, business_objective: s
         await _update_session(session_id, {"session_status": "DEBATING", "court_record": court_record})
         await sse_manager.publish(case_id, "AGENT_STARTED", {"agent": "ARCHITECT", "session_id": session_id})
         
+        # Write Root CausalNode
+        from neo4j_service import neo4j_service
+        root_causal_id = await neo4j_service.write_causal_node(
+            case_id, "GLOBAL", "Schema Context Injection",
+            {"schema_version": "v2.1", "is_root": True}
+        )
+        
+        # Fetch session
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(CourtSession).where(CourtSession.session_id == session_id)
+            )
+            session = result.scalar_one_or_none()
+            
+            # Store in session
+            causal_node_ids = session.causal_node_ids or {} if session else {}
+            
+        if root_causal_id:
+            causal_node_ids["GLOBAL"] = root_causal_id
+            
         initial_nodes = await architect_agent.run_round1(business_objective)
-        await _update_session(session_id, {"architect_done": True})
+        
+        # Write Parameter Declaration CausalNodes for each API_CALL
+        from firewall.schema_registry import get_production_schema
+        for node in initial_nodes:
+            if node.get("node_type") == "API_CALL":
+                nid = node.get("node_id")
+                target = node.get("target_endpoint", "")
+                
+                prod_schema = get_production_schema(target)
+                expected_v24 = []
+                if prod_schema and "schema" in prod_schema and "parameters" in prod_schema["schema"]:
+                    expected_v24 = [p["name"] for p in prod_schema["schema"]["parameters"]]
+                
+                declared_v21 = list(node.get("declared_parameters", {}).keys())
+                
+                cid = await neo4j_service.write_causal_node(
+                    case_id, nid, "Parameter Declaration",
+                    {"declared_params_v21": str(declared_v21), "expected_params_v24": str(expected_v24)},
+                    link_from_internal_id=root_causal_id
+                )
+                if cid:
+                    causal_node_ids[nid] = cid
+                
+        # Update court record and causal_node_ids in DB
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(CourtSession).where(CourtSession.session_id == session_id)
+            )
+            session = result.scalar_one_or_none()
+            if session:
+                session.causal_node_ids = causal_node_ids
+                session.court_record = court_record
+                session.architect_done = True
+                await db.commit()
+            
+        await _update_session(session_id, {"session_status": "DEBATING"})
 
         # ── ROUND 2: Cross-Examination ──────────────────────────────────────
         print("[Court] Round 2a: Challengers cross-examining proposal...")
