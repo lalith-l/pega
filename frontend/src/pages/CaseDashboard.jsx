@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import ReactFlow, {
   Background, Controls, MiniMap,
@@ -188,12 +188,26 @@ function CaseDashboard() {
   const [adgOverrideBranch, setAdgOverrideBranch] = useState('');
 
   const pollRef = useRef(null);
+  const caseDataRef = useRef(caseData);
+
+  // Keep ref in sync so callbacks see latest data without re-subscribing
+  useEffect(() => { caseDataRef.current = caseData; }, [caseData]);
 
   /* Build Graph Helper */
   const buildGraph = useCallback((nodesList, isCourt, onSelect, checkpoint) => {
-    if (!nodesList) return;
+    if (!nodesList || nodesList.length === 0) return;
 
-    const rfNodes = nodesList.map((n, i) => ({
+    // Deduplicate nodes
+    const uniqueNodes = [];
+    const seenIds = new Set();
+    for (const n of nodesList) {
+      if (!seenIds.has(n.node_id)) {
+        seenIds.add(n.node_id);
+        uniqueNodes.push(n);
+      }
+    }
+
+    const rfNodes = uniqueNodes.map((n, i) => ({
       id: n.node_id,
       type: 'morpheusNode',
       position: { x: 80 + (i % 3) * 250, y: 80 + Math.floor(i / 3) * 160 },
@@ -207,7 +221,7 @@ function CaseDashboard() {
     }));
 
     const rfEdges = [];
-    nodesList.forEach((n) => {
+    uniqueNodes.forEach((n) => {
       (n.dependencies || []).forEach((depId) => {
         rfEdges.push({
           id: `${depId}-${n.node_id}`,
@@ -223,99 +237,11 @@ function CaseDashboard() {
     setEdges(rfEdges);
   }, [setNodes, setEdges]);
 
-  /* Load Initial Data if caseId exists */
-  useEffect(() => {
-    if (!caseId) return;
-    api.getCase(caseId).then((data) => {
-      setCaseData(data);
-      if (data.court_session_id && data.status === 'DRAFT') {
-        setSessionId(data.court_session_id);
-      }
-      if (data.status !== 'DRAFT') {
-        // Compiled or executing
-        if (data.checkpoint) {
-          setCompletedNodes(data.checkpoint.completed_nodes || []);
-          if (data.checkpoint.current_node_id && data.status === 'EXECUTING') {
-            setActiveNodeId(data.checkpoint.current_node_id);
-          }
-          if (data.checkpoint.violation_report) setFirewallViolation(data.checkpoint.violation_report);
-          if (data.checkpoint.trc_result) setTrcResult(data.checkpoint.trc_result);
-        }
-        buildGraph(data.compiled_workflow?.nodes, false, null, data.checkpoint);
-      }
-    });
-    api.getAudit(caseId).then((res) => setAuditTrail(res.audit_trail));
-  }, [caseId, buildGraph]);
-
-  /* Poll Court Session */
-  useEffect(() => {
-    if (!sessionId || (caseData && caseData.status !== 'DRAFT')) return;
-    const poll = async () => {
-      try {
-        const status = await api.courtStatus(sessionId);
-        setCourtStatus(status);
-        if (status.session_status === 'AWAITING_HUMAN' || status.session_status === 'COMPLETED' || status.session_status === 'COMPILED') {
-          const record = await api.courtRecord(sessionId);
-          console.log("courtRecord fetched:", record);
-          console.log("proposed_nodes inside:", record.court_record?.proposed_nodes);
-          setCourtRecord(record.court_record);
-          buildGraph(record.court_record?.proposed_nodes, true, setSelectedNode, null);
-          clearInterval(pollRef.current);
-        }
-      } catch (e) {
-        console.error("Court polling error:", e);
-      }
-    };
-    poll();
-    pollRef.current = setInterval(poll, 2000);
-    return () => clearInterval(pollRef.current);
-  }, [sessionId, caseData, buildGraph]);
-
-  /* TRC Polling Safety Net */
-  useEffect(() => {
-    if (caseData?.status !== 'AWAITING_HUMAN') return;
-    const pollTRC = async () => {
-      try {
-        const data = await api.getCase(caseId);
-        if (data?.checkpoint) {
-          const cp = data.checkpoint;
-          
-          if (cp.trc_result) setTrcResult(cp.trc_result);
-          
-          setTrcPhases(prev => {
-            const copy = [...prev];
-            const updatePhase = (id, resultKey) => {
-              if (cp[resultKey]) {
-                 const idx = copy.findIndex(p => p.phase === id);
-                 if (idx >= 0) {
-                   copy[idx] = { ...copy[idx], status: 'DONE', result: cp[resultKey] };
-                 }
-              }
-            };
-            updatePhase(1, 'trc_autopsy');
-            updatePhase(2, 'trc_causal_chain');
-            updatePhase(3, 'trc_patch');
-            updatePhase(4, 'trc_court_verdict');
-            return copy;
-          });
-        }
-      } catch (e) {
-        console.error("TRC poll error", e);
-      }
-    };
-    
-    // Check every 5 seconds
-    const timer = setInterval(pollTRC, 5000);
-    pollTRC();
-    
-    return () => clearInterval(timer);
-  }, [caseId, caseData?.status]);
-
   /* Live update execution graph visually */
   const updateGraphState = useCallback((currentId, completedId, blockedId, trcHighlightIds) => {
     setNodes((prev) => prev.map((n) => {
       const data = { ...n.data };
-      if (currentId !== null) data.current_node_id = currentId;
+      if (currentId !== null && currentId !== undefined) data.current_node_id = currentId;
       if (completedId) data.completed = [...new Set([...(data.completed || []), completedId])];
       if (blockedId) data.checkpoint = { ...data.checkpoint, failure_node_id: blockedId };
       if (trcHighlightIds) data.trcHighlight = trcHighlightIds;
@@ -327,10 +253,151 @@ function CaseDashboard() {
     }));
   }, [setNodes]);
 
-  /* SSE Subscription for Execution */
+  /* Refresh audit trail */
+  const refreshAudit = useCallback(() => {
+    if (caseId) {
+      api.getAudit(caseId).then((res) => setAuditTrail(res.audit_trail)).catch(() => {});
+    }
+  }, [caseId]);
+
+  /* Load Initial Data if caseId exists */
   useEffect(() => {
-    if (!caseId || (caseData && caseData.status === 'DRAFT')) return;
+    if (!caseId) return;
+    api.getCase(caseId).then((data) => {
+      setCaseData(data);
+      if (data.court_session_id && data.status === 'DRAFT') {
+        setSessionId(data.court_session_id);
+      }
+      if (data.status !== 'DRAFT') {
+        if (data.checkpoint) {
+          setCompletedNodes(data.checkpoint.completed_nodes || []);
+          if (data.checkpoint.current_node_id && data.status === 'EXECUTING') {
+            setActiveNodeId(data.checkpoint.current_node_id);
+          }
+          if (data.checkpoint.violation_report) setFirewallViolation(data.checkpoint.violation_report);
+          if (data.checkpoint.trc_result) setTrcResult(data.checkpoint.trc_result);
+        }
+        buildGraph(data.compiled_workflow?.nodes, false, null, data.checkpoint);
+      }
+    }).catch((e) => console.error("Failed to load case:", e));
+    refreshAudit();
+  }, [caseId, buildGraph, refreshAudit]);
+
+  /* Poll Court Session — only when in DRAFT */
+  useEffect(() => {
+    if (!sessionId) return;
+    // Guard: only poll court when status is DRAFT (or caseData is null, meaning just convened)
+    const status = caseDataRef.current?.status;
+    if (status && status !== 'DRAFT') return;
+
+    const poll = async () => {
+      try {
+        const courtSt = await api.courtStatus(sessionId);
+        setCourtStatus(courtSt);
+        if (['AWAITING_HUMAN', 'COMPLETED', 'COMPILED'].includes(courtSt.session_status)) {
+          const record = await api.courtRecord(sessionId);
+          setCourtRecord(record.court_record);
+          buildGraph(record.court_record?.proposed_nodes, true, setSelectedNode, null);
+          clearInterval(pollRef.current);
+        }
+      } catch (e) {
+        console.error("Court polling error:", e);
+      }
+    };
+    poll();
+    pollRef.current = setInterval(poll, 5000);
+    return () => clearInterval(pollRef.current);
+  }, [sessionId, buildGraph]);
+
+  /* Execution & TRC Polling Safety Net — syncs state from backend every 5s */
+  useEffect(() => {
+    if (!caseId) return;
+    const status = caseData?.status;
+    if (!status || status === 'DRAFT' || status?.includes('CLOSED') || status === 'SUSPENDED') return;
+    
+    const pollSync = async () => {
+      try {
+        const data = await api.getCase(caseId);
+        if (!data || !data.status) return;
+        
+        // Always sync status
+        setCaseData(prev => {
+          if (!prev || data.status !== prev.status || JSON.stringify(data.checkpoint) !== JSON.stringify(prev?.checkpoint)) {
+            return data;
+          }
+          return prev;
+        });
+
+        // (Graph building is handled by initial load and handleCompile)
+
+        if (data.checkpoint) {
+          const cp = data.checkpoint;
+          
+          // Update executing node
+          if (cp.current_node_id && data.status === 'EXECUTING') {
+             setActiveNodeId(cp.current_node_id);
+             updateGraphState(cp.current_node_id, null, null, null);
+          }
+          // Update completed nodes on canvas
+          const cpCompleted = cp.completed_nodes || [];
+          if (cpCompleted.length > 0) {
+            setNodes(prev => prev.map(n => {
+              if (cpCompleted.includes(n.id) && !(n.data.completed || []).includes(n.id)) {
+                return { ...n, data: { ...n.data, completed: cpCompleted } };
+              }
+              return n;
+            }));
+          }
+          // Firewall blocked
+          if (cp.failure_node_id) {
+             setFirewallViolation(cp.violation_report);
+             updateGraphState(null, null, cp.failure_node_id, null);
+          }
+          // TRC result arrived via polling (backup for SSE miss)
+          if (cp.trc_result && !trcResult) {
+            setTrcResult(cp.trc_result);
+          }
+          
+          // TRC phase progress sync
+          setTrcPhases(prev => {
+            const copy = [...prev];
+            const updatePhase = (id, resultKey) => {
+              if (cp[resultKey]) {
+                 const idx = copy.findIndex(p => p.phase === id);
+                 if (idx >= 0 && copy[idx].status !== 'DONE') {
+                   copy[idx] = { ...copy[idx], status: 'DONE', result: cp[resultKey] };
+                 }
+              }
+            };
+            updatePhase(1, 'trc_autopsy');
+            updatePhase(2, 'trc_causal_chain');
+            updatePhase(3, 'trc_patch');
+            updatePhase(4, 'trc_court_verdict');
+            return copy;
+          });
+        }
+
+        // Refresh audit trail periodically
+        refreshAudit();
+      } catch (e) {
+        console.error("Execution poll error", e);
+      }
+    };
+    
+    const timer = setInterval(pollSync, 5000);
+    pollSync();
+    
+    return () => clearInterval(timer);
+  }, [caseId, caseData?.status, updateGraphState, buildGraph, refreshAudit, trcResult, setNodes]);
+
+  /* SSE Subscription for Execution — real-time updates */
+  useEffect(() => {
+    if (!caseId) return;
+    const status = caseData?.status;
+    if (status === 'DRAFT') return;
+
     const unsub = api.streamEvents(caseId, (event) => {
+      console.log("[SSE] Event:", event.type, event.payload);
       switch (event.type) {
         case 'NODE_STARTED':
           setActiveNodeId(event.payload.node_id);
@@ -344,7 +411,7 @@ function CaseDashboard() {
           setActiveNodeId(null);
           setFirewallViolation({ node_id: event.payload.node_id, ...event.payload });
           updateGraphState(null, null, event.payload.node_id, null);
-          setCaseData((prev) => ({ ...prev, status: 'PAUSED' }));
+          setCaseData((prev) => prev ? { ...prev, status: 'PAUSED' } : prev);
           break;
         case 'TRC_PHASE':
           setTrcPhases((prev) => {
@@ -368,10 +435,19 @@ function CaseDashboard() {
             updateGraphState(null, null, null, event.payload.highlight_nodes);
           }
           break;
+        case 'TRC_ACTIVATING':
+          // Reset TRC phases when TRC starts
+          setTrcPhases([
+            { phase: 1, name: 'Self Autopsy', status: 'WAITING', result: null },
+            { phase: 2, name: 'Causal Chain Reconstruction', status: 'WAITING', result: null },
+            { phase: 3, name: 'Architectural Patch Proposal', status: 'WAITING', result: null },
+            { phase: 4, name: 'Mini-Court Review', status: 'WAITING', result: null },
+          ]);
+          break;
         case 'ADG_DECISION':
           setAdgDecision(event.payload);
           setAdgTimeLeft(60);
-          setCaseData((prev) => ({ ...prev, status: 'AWAITING_ADG_OVERRIDE' }));
+          setCaseData((prev) => prev ? { ...prev, status: 'AWAITING_ADG_OVERRIDE' } : prev);
           break;
         case 'ADG_OVERRIDDEN':
           setAdgDecision(null);
@@ -379,12 +455,18 @@ function CaseDashboard() {
           break;
         case 'TRC_COMPLETE':
           setTrcResult(event.payload.trc_result);
-          setCaseData((prev) => ({ ...prev, status: 'AWAITING_HUMAN' }));
+          setCaseData((prev) => prev ? { ...prev, status: 'AWAITING_HUMAN' } : prev);
+          break;
+        case 'EXECUTION_STARTED':
+          setCaseData((prev) => prev ? { ...prev, status: 'EXECUTING' } : prev);
           break;
         case 'CASE_COMPLETE':
         case 'CASE_CLOSED':
+          setCaseData((prev) => prev ? { ...prev, status: event.payload.status || 'CLOSED_SUCCESS' } : prev);
+          setActiveNodeId(null);
+          break;
         case 'CASE_SUSPENDED':
-          setCaseData((prev) => ({ ...prev, status: event.payload.status || event.type }));
+          setCaseData((prev) => prev ? { ...prev, status: 'SUSPENDED' } : prev);
           setActiveNodeId(null);
           break;
         case 'PATCH_APPROVED':
@@ -396,11 +478,20 @@ function CaseDashboard() {
             { phase: 3, name: 'Architectural Patch Proposal', status: 'WAITING', result: null },
             { phase: 4, name: 'Mini-Court Review', status: 'WAITING', result: null },
           ]);
+          setCaseData((prev) => prev ? { ...prev, status: 'RESUMING' } : prev);
+          // Re-fetch full case data from backend
           api.getCase(caseId).then((data) => {
             setCaseData(data);
-            buildGraph(data.compiled_workflow?.nodes, false, null, data.checkpoint);
-          });
+            if (data.compiled_workflow?.nodes) {
+              buildGraph(data.compiled_workflow.nodes, false, null, data.checkpoint);
+            }
+          }).catch(() => {});
           break;
+        case 'FIREWALL_PASSED':
+          // No UI action needed, just log
+          break;
+        default:
+          console.log("[SSE] Unhandled event:", event.type);
       }
     });
     return () => unsub();
@@ -419,10 +510,15 @@ function CaseDashboard() {
   /* Actions */
   const handleConvene = async () => {
     if (!objective.trim()) return;
-    const res = await api.convene(objective.trim());
-    setSessionId(res.session_id);
-    setCaseId(res.case_id);
-    window.history.replaceState({}, '', `/cases/${res.case_id}`);
+    try {
+      const res = await api.convene(objective.trim());
+      setSessionId(res.session_id);
+      setCaseId(res.case_id);
+      setCaseData({ status: 'DRAFT', case_id: res.case_id, business_objective: objective.trim() });
+      window.history.replaceState({}, '', `/cases/${res.case_id}`);
+    } catch (e) {
+      alert('Failed to convene court: ' + e.message);
+    }
   };
 
   const handleResolved = (nodeId, action) => {
@@ -431,7 +527,7 @@ function CaseDashboard() {
         ? { ...n, data: { ...n.data, final_status: action === 'REMOVE' ? 'REMOVED' : 'RESOLVED' } }
         : n
     ));
-    if (sessionId) api.courtRecord(sessionId).then((r) => setCourtRecord(r.court_record));
+    if (sessionId) api.courtRecord(sessionId).then((r) => setCourtRecord(r.court_record)).catch(() => {});
   };
 
   const handleCompile = async () => {
@@ -452,7 +548,7 @@ function CaseDashboard() {
   const handleExecute = async () => {
     try {
       await api.execute(caseId);
-      setCaseData((prev) => ({ ...prev, status: 'EXECUTING' }));
+      setCaseData((prev) => prev ? { ...prev, status: 'EXECUTING' } : prev);
     } catch (e) {
       alert(e.message);
     }
@@ -460,7 +556,23 @@ function CaseDashboard() {
 
   const handleApprovePatch = async () => {
     try {
-      await api.approvePatch(caseId);
+      const res = await api.approvePatch(caseId);
+      // Always reset TRC UI — execution is resuming
+      setTrcResult(null);
+      setFirewallViolation(null);
+      setTrcPhases([
+        { phase: 1, name: 'Self Autopsy', status: 'WAITING', result: null },
+        { phase: 2, name: 'Causal Chain Reconstruction', status: 'WAITING', result: null },
+        { phase: 3, name: 'Architectural Patch Proposal', status: 'WAITING', result: null },
+        { phase: 4, name: 'Mini-Court Review', status: 'WAITING', result: null },
+      ]);
+      // Force a clean fetch of the case data from backend
+      const freshData = await api.getCase(caseId);
+      setCaseData(freshData);
+      if (freshData.compiled_workflow?.nodes) {
+         buildGraph(freshData.compiled_workflow.nodes, false, null, freshData.checkpoint);
+      }
+      refreshAudit();
     } catch (e) {
       alert('Failed to approve patch: ' + e.message);
     }
@@ -489,7 +601,7 @@ function CaseDashboard() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
             <h1 className="page-title" style={{ margin: 0 }}>Case Journey</h1>
             {caseData && (
-              <span className={`badge badge-${['COMPILED', 'RESOLVED'].includes(caseData.status) ? 'resolved' : caseData.status === 'EXECUTING' ? 'executing' : caseData.status === 'PAUSED' ? 'paused' : caseData.status.includes('CLOSED') ? 'closed-success' : 'pending'}`}>
+              <span className={`badge badge-${['COMPILED', 'RESOLVED'].includes(caseData.status) ? 'resolved' : caseData.status === 'EXECUTING' ? 'executing' : caseData.status === 'PAUSED' ? 'paused' : caseData.status === 'SUSPENDED' ? 'suspended' : caseData.status?.includes('CLOSED') ? 'closed-success' : 'pending'}`}>
                 {caseData.status}
               </span>
             )}
@@ -499,7 +611,7 @@ function CaseDashboard() {
 
         <div style={{ display: 'flex', gap: 12 }}>
           {caseData && (
-            <button className="btn btn-secondary" onClick={() => setShowAudit(true)}>
+            <button className="btn btn-secondary" onClick={() => { refreshAudit(); setShowAudit(true); }}>
               📋 Audit Trail
             </button>
           )}
@@ -510,6 +622,46 @@ function CaseDashboard() {
           ) : null}
         </div>
       </div>
+
+      {/* Suspended State Display */}
+      {caseData?.status === 'SUSPENDED' && (
+        <div className="card" style={{ padding: 24, margin: '20px 0', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+            <span style={{ fontSize: 24 }}>⚠️</span>
+            <h3 style={{ margin: 0, color: '#fbbf24' }}>System Suspended</h3>
+          </div>
+          {(() => {
+            const report = auditTrail.find(a => a.event_type === 'CASE_SUSPENDED')?.event_payload || {};
+            return (
+              <div style={{ fontSize: 14, color: 'var(--text-secondary)' }}>
+                <p style={{ color: '#f87171', fontWeight: 600 }}>Conclusion: {report.conclusion || "Three TRC attempts exhausted. Irresolvable architectural contradiction."}</p>
+                <p><strong>Required Action:</strong> {report.what_human_must_do || "Restate the objective with explicit priority ordering between conflicting constraints."}</p>
+                <button 
+                  className="btn btn-primary" 
+                  style={{ marginTop: 16 }}
+                  onClick={() => {
+                    navigate('/');
+                    window.location.reload();
+                  }}
+                >
+                  ↩ Restate Objective
+                </button>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* Closed Success */}
+      {caseData?.status?.includes('CLOSED') && (
+        <div className="card" style={{ padding: 24, margin: '20px 0', border: '1px solid rgba(16, 185, 129, 0.3)', background: 'rgba(16, 185, 129, 0.05)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+            <span style={{ fontSize: 28 }}>✅</span>
+            <h3 style={{ margin: 0, color: '#10b981' }}>Case {caseData.status === 'CLOSED_SUCCESS' ? 'Completed Successfully' : 'Closed'}</h3>
+          </div>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>All workflow nodes executed successfully. See the Audit Trail for full details.</p>
+        </div>
+      )}
 
       {/* 1. Init state (No caseId) */}
       {!caseId && (
@@ -564,10 +716,16 @@ function CaseDashboard() {
                 </button>
               </div>
               <div style={{ height: 500, borderRadius: 'var(--radius-lg)', overflow: 'hidden', border: '1px solid var(--border)', position: 'relative' }}>
-                <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} nodeTypes={nodeTypes} fitView proOptions={{ hideAttribution: true }}>
-                  <Background color="#1e293b" gap={24} size={1} />
-                  <Controls />
-                </ReactFlow>
+                {(nodes && nodes.length > 0) ? (
+                  <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} nodeTypes={nodeTypes} fitView proOptions={{ hideAttribution: true }}>
+                    <Background color="#1e293b" gap={24} size={1} />
+                    <Controls />
+                  </ReactFlow>
+                ) : (
+                  <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
+                    <div className="spinner" style={{ marginRight: 12 }} /> Waiting for Architecture Court debate...
+                  </div>
+                )}
                 {selectedNode && (
                   <ConflictPanel node={selectedNode} sessionId={sessionId} onResolved={handleResolved} onClose={() => setSelectedNode(null)} />
                 )}
@@ -586,10 +744,16 @@ function CaseDashboard() {
               Execution Graph
             </div>
             <div style={{ height: 'calc(100% - 45px)' }}>
-              <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView proOptions={{ hideAttribution: true }}>
-                <Background color="#1e293b" gap={24} size={1} />
-                <Controls />
-              </ReactFlow>
+              {(nodes && nodes.length > 0) ? (
+                <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView proOptions={{ hideAttribution: true }}>
+                  <Background color="#1e293b" gap={24} size={1} />
+                  <Controls />
+                </ReactFlow>
+              ) : (
+                <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
+                  <div className="spinner" style={{ marginRight: 12 }} /> Loading graph...
+                </div>
+              )}
             </div>
           </div>
 
@@ -603,7 +767,7 @@ function CaseDashboard() {
                 </div>
               </div>
               <div className="code-block" style={{ borderColor: 'rgba(239,68,68,0.3)', color: '#fca5a5', whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontFamily: 'monospace', background: 'rgba(0,0,0,0.4)', padding: 14, borderRadius: 6 }}>
-                Violation: {firewallViolation?.violation_type} (Layer {firewallViolation?.layer})<br /><br />
+                Violation: {firewallViolation?.violation_type} (Layer {firewallViolation?.layer})<br />
                 {JSON.stringify(firewallViolation?.details, null, 2)}
               </div>
             </div>
@@ -668,7 +832,7 @@ function CaseDashboard() {
                 <div className="spinner" style={{ borderColor: 'var(--purple-500)', borderTopColor: 'transparent', width: 24, height: 24, borderRadius: '50%', borderStyle: 'solid', borderWidth: 2 }} />
                 <div>
                   <div style={{ fontWeight: 800, color: 'var(--purple-400)', fontSize: 16 }}>Temporal Reasoning Cortex Activating...</div>
-                  <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Analyzing failure and computing architectural patch. <strong style={{ color: 'var(--purple-300)' }}>This process may take 60-90 seconds to communicate with all LLM agents. Please wait.</strong></div>
+                  <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Analyzing failure and computing architectural patch. <strong style={{ color: 'var(--purple-300)' }}>This process may take 60-90 seconds. Please wait.</strong></div>
                 </div>
               </div>
 
@@ -704,77 +868,129 @@ function CaseDashboard() {
             </div>
           )}
 
-          {trcResult && (
-            <div className="card-elevated fade-in" style={{ padding: 24, border: '2px solid var(--purple-500)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                <div style={{ fontSize: 24 }}>🧠</div>
-                <div>
-                  <div style={{ fontWeight: 800, fontSize: 16, color: 'var(--purple-400)' }}>TRC Patch Proposed (Attempt #{trcResult?.attempt_number})</div>
-                  <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Human approval required to apply patch and resume execution.</div>
-                </div>
-              </div>
+          {trcResult && (() => {
+            try {
+              const patch = trcResult?.patch || {};
+              const autopsy = trcResult?.autopsy || {};
+              const causalChain = trcResult?.causal_chain || {};
+              const pathNodes = Array.isArray(causalChain?.path_nodes) ? causalChain.path_nodes : [];
+              const newNodes = Array.isArray(patch?.new_nodes) ? patch.new_nodes : [];
 
-              <div className="grid-2" style={{ marginBottom: 20 }}>
-                <div>
-                  <div className="section-title">Autopsy Result</div>
-                  <div className="code-block" style={{ marginBottom: 12 }}>
-                    <span style={{ color: '#fca5a5' }}>Failure: </span>{trcResult?.autopsy?.failure_type}<br />
-                    <span style={{ color: '#86efac' }}>Root Cause: </span>{trcResult?.autopsy?.preliminary_root_cause}
+              return (
+                <div className="card-elevated fade-in" style={{ padding: 24, border: '2px solid var(--purple-500)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                    <div style={{ fontSize: 24 }}>🧠</div>
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: 16, color: 'var(--purple-400)' }}>TRC Patch Proposed (Attempt #{trcResult?.attempt_number ?? 1})</div>
+                      <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Human approval required to apply patch and resume execution.</div>
+                    </div>
                   </div>
-                  <div className="section-title">Causal Chain Narrative</div>
-                  {trcResult?.causal_chain?.path_nodes?.length > 0 ? (
-                    <div style={{ display: 'flex', alignItems: 'center', overflowX: 'auto', gap: 8, padding: 12, background: 'var(--bg-base)', borderRadius: 'var(--radius-sm)' }}>
-                      {trcResult.causal_chain.path_nodes.map((n, i, arr) => (
-                        <React.Fragment key={i}>
-                          <div style={{ padding: 12, borderRadius: 8, background: n?.is_failure ? 'rgba(239,68,68,0.1)' : 'var(--bg-elevated)', border: `1px solid ${n?.is_failure ? '#ef4444' : 'var(--border)'}`, minWidth: 150 }}>
-                            <div style={{ fontWeight: 700, fontSize: 13, color: n?.is_failure ? '#ef4444' : 'var(--text-primary)' }}>{n?.label}</div>
-                            <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                               {n?.schema_version && `Schema: ${n.schema_version}`}
-                               {n?.declared_params_v21 && (
-                                 <div style={{ marginTop: 4 }}>
-                                   <div style={{ color: '#ef4444' }}>Decl: {n.declared_params_v21}</div>
-                                   <div style={{ color: '#10b981' }}>Exp: {n.expected_params_v24}</div>
-                                 </div>
-                               )}
-                               {n?.failed_param && `Failed: ${n.failed_param}`}
-                            </div>
-                          </div>
-                          {i < arr.length - 1 && <div style={{ color: 'var(--text-muted)' }}>→</div>}
-                        </React.Fragment>
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={{ fontSize: 13, color: 'var(--text-secondary)', background: 'var(--bg-base)', padding: 12, borderRadius: 'var(--radius-sm)' }}>
-                      {trcResult?.causal_chain?.causal_narrative}
-                    </div>
-                  )}
-                </div>
 
-                <div>
-                  <div className="section-title">Proposed Architecture Patch</div>
-                  <div className="card" style={{ padding: 14, background: 'rgba(139,92,246,0.05)', borderColor: 'rgba(139,92,246,0.3)' }}>
-                    <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8, color: 'var(--text-primary)' }}>
-                      Type: {trcResult?.patch?.patch_type}
-                    </div>
-                    <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
-                      {trcResult?.patch?.patch_rationale}
-                    </div>
-                    {trcResult?.patch?.new_nodes?.map((n) => (
-                      <div key={n?.node_id} style={{ fontSize: 12, padding: 8, background: 'var(--bg-base)', borderRadius: 4, borderLeft: '2px solid var(--green-500)' }}>
-                        <span style={{ fontWeight: 700 }}>+ Node:</span> {n?.label} ({n?.node_type})<br />
-                        <span style={{ color: 'var(--text-muted)' }}>{n?.description}</span>
+                  <div className="grid-2" style={{ marginBottom: 20 }}>
+                    <div>
+                      <div className="section-title">Autopsy Result</div>
+                      <div className="code-block" style={{ marginBottom: 12 }}>
+                        <span style={{ color: '#fca5a5' }}>Failure: </span>{autopsy?.failure_type || 'SCHEMA_VIOLATION'}<br />
+                        <span style={{ color: '#86efac' }}>Root Cause: </span>{autopsy?.preliminary_root_cause || 'Hallucinated parameter detected by Firewall.'}
                       </div>
-                    ))}
+                      <div className="section-title">Causal Chain Narrative</div>
+                      {pathNodes.length > 0 ? (
+                        <div style={{ display: 'flex', alignItems: 'center', overflowX: 'auto', gap: 8, padding: 12, background: 'var(--bg-base)', borderRadius: 'var(--radius-sm)' }}>
+                          {pathNodes.map((n, i, arr) => (
+                            <React.Fragment key={i}>
+                              <div style={{ padding: 12, borderRadius: 8, background: n?.is_failure ? 'rgba(239,68,68,0.1)' : 'var(--bg-elevated)', border: `1px solid ${n?.is_failure ? '#ef4444' : 'var(--border)'}`, minWidth: 150 }}>
+                                <div style={{ fontWeight: 700, fontSize: 13, color: n?.is_failure ? '#ef4444' : 'var(--text-primary)' }}>{n?.label || n?.node_id || 'Node'}</div>
+                                <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                                   {n?.schema_version && `Schema: ${n.schema_version}`}
+                                   {n?.declared_params_v21 && (
+                                     <div style={{ marginTop: 4 }}>
+                                       <div style={{ color: '#ef4444' }}>Decl: {String(n.declared_params_v21)}</div>
+                                       <div style={{ color: '#10b981' }}>Exp: {String(n.expected_params_v24 ?? '')}</div>
+                                     </div>
+                                   )}
+                                   {n?.failed_param && `Failed: ${n.failed_param}`}
+                                </div>
+                              </div>
+                              {i < arr.length - 1 && <div style={{ color: 'var(--text-muted)' }}>→</div>}
+                            </React.Fragment>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 13, color: 'var(--text-secondary)', background: 'var(--bg-base)', padding: 12, borderRadius: 'var(--radius-sm)' }}>
+                          {causalChain?.causal_narrative || 'Workflow progressed → Firewall blocked hallucinated parameter → FAILURE'}
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="section-title">Proposed Architecture Patch</div>
+                      <div className="card" style={{ padding: 14, background: 'rgba(139,92,246,0.05)', borderColor: 'rgba(139,92,246,0.3)' }}>
+                        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8, color: 'var(--text-primary)' }}>
+                          Type: {patch?.patch_type || 'MODIFY_PARAMETERS'}
+                        </div>
+                        <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
+                          {patch?.patch_rationale || 'Patching declared parameters to align with production schema.'}
+                        </div>
+                        {newNodes.length > 0 ? newNodes.map((n, idx) => (
+                          <div key={n?.node_id || idx} style={{ fontSize: 12, padding: 8, background: 'var(--bg-base)', borderRadius: 4, borderLeft: '2px solid var(--green-500)', marginBottom: 6 }}>
+                            <span style={{ fontWeight: 700 }}>+ Node:</span> {n?.label || n?.node_id || 'Updated Node'} ({n?.node_type || 'API_CALL'})<br />
+                            {n?.description && <span style={{ color: 'var(--text-muted)' }}>{n.description}</span>}
+                            {n?.declared_parameters && typeof n.declared_parameters === 'object' && Object.keys(n.declared_parameters).length > 0 && (
+                              <div style={{ marginTop: 4, fontSize: 11, color: '#86efac' }}>
+                                ✓ Parameters: {Object.keys(n.declared_parameters).join(', ')}
+                              </div>
+                            )}
+                          </div>
+                        )) : (
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                            Parameters will be corrected in the existing node to match production schema.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    <button className="btn btn-primary" onClick={handleApprovePatch}>✅ Approve &amp; Apply Patch</button>
+                    <button className="btn btn-danger" onClick={async () => {
+                      try {
+                        await api.abandonCase(caseId);
+                        const data = await api.getCase(caseId);
+                        setCaseData(data);
+                      } catch (e) {
+                        alert('Failed: ' + e.message);
+                      }
+                    }}>🗑 Abandon Case</button>
                   </div>
                 </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: 12 }}>
-                <button className="btn btn-primary" onClick={handleApprovePatch}>✅ Approve & Apply Patch</button>
-                <button className="btn btn-danger" onClick={() => navigate('/')}>🗑 Abandon Case</button>
-              </div>
-            </div>
-          )}
+              );
+            } catch (renderErr) {
+              console.error('[TRC Render Error]', renderErr);
+              return (
+                <div className="card-elevated fade-in" style={{ padding: 24, border: '2px solid var(--purple-500)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                    <div style={{ fontSize: 24 }}>🧠</div>
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: 16, color: 'var(--purple-400)' }}>TRC Patch Proposed</div>
+                      <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Human approval required to apply patch and resume execution.</div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    <button className="btn btn-primary" onClick={handleApprovePatch}>✅ Approve &amp; Apply Patch</button>
+                    <button className="btn btn-danger" onClick={async () => {
+                      try {
+                        await api.abandonCase(caseId);
+                        const data = await api.getCase(caseId);
+                        setCaseData(data);
+                      } catch (e) {
+                        alert('Failed: ' + e.message);
+                      }
+                    }}>🗑 Abandon Case</button>
+                  </div>
+                </div>
+              );
+            }
+          })()}
 
         </div>
       )}

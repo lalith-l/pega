@@ -33,19 +33,15 @@ export class ErrorBoundary extends React.Component {
           color: 'var(--text-primary)',
           fontFamily: 'system-ui, sans-serif'
         }}>
-          <div style={{
-            background: 'var(--bg-surface)',
-            padding: '40px',
-            borderRadius: '16px',
-            border: '1px solid rgba(239, 68, 68, 0.3)',
-            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)',
-            maxWidth: '500px',
-            textAlign: 'center'
-          }}>
-            <h2 style={{ color: '#fca5a5', marginTop: 0 }}>An error occurred.</h2>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: '30px' }}>
+          <div style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: 32, maxWidth: 500, margin: '80px auto', textAlign: 'center' }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>💥</div>
+            <h2 style={{ color: 'var(--red-500)', marginBottom: 12 }}>Application Error</h2>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: 24, fontSize: 14 }}>
               The application encountered an unexpected rendering error. Your case data is still safe in the database.
             </p>
+            <div style={{ textAlign: 'left', background: '#000', color: '#ff4444', padding: 12, borderRadius: 8, overflow: 'auto', fontSize: 12, marginBottom: 24, fontFamily: 'monospace' }}>
+              {this.state.error && this.state.error.message}
+            </div>
             <button
               onClick={this.handleReload}
               style={{
