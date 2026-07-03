@@ -490,6 +490,10 @@ function CaseDashboard() {
         case 'FIREWALL_PASSED':
           // No UI action needed, just log
           break;
+        case 'EXECUTION_FAILED':
+          setCaseData((prev) => prev ? { ...prev, status: 'FAILED' } : prev);
+          setActiveNodeId(null);
+          break;
         default:
           console.log("[SSE] Unhandled event:", event.type);
       }
@@ -601,7 +605,7 @@ function CaseDashboard() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
             <h1 className="page-title" style={{ margin: 0 }}>Case Journey</h1>
             {caseData && (
-              <span className={`badge badge-${['COMPILED', 'RESOLVED'].includes(caseData.status) ? 'resolved' : caseData.status === 'EXECUTING' ? 'executing' : caseData.status === 'PAUSED' ? 'paused' : caseData.status === 'SUSPENDED' ? 'suspended' : caseData.status?.includes('CLOSED') ? 'closed-success' : 'pending'}`}>
+              <span className={`badge badge-${['COMPILED', 'RESOLVED'].includes(caseData.status) ? 'resolved' : caseData.status === 'EXECUTING' ? 'executing' : caseData.status === 'PAUSED' ? 'paused' : caseData.status === 'SUSPENDED' ? 'suspended' : caseData.status?.includes('CLOSED') ? 'closed-success' : caseData.status === 'FAILED' ? 'error' : 'pending'}`}>
                 {caseData.status}
               </span>
             )}
@@ -662,6 +666,25 @@ function CaseDashboard() {
           <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>All workflow nodes executed successfully. See the Audit Trail for full details.</p>
         </div>
       )}
+
+      {/* Failed State */}
+      {caseData?.status === 'FAILED' && (
+        <div className="card" style={{ padding: 24, margin: '20px 0', border: '1px solid rgba(239, 68, 68, 0.3)', background: 'rgba(239, 68, 68, 0.05)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+            <span style={{ fontSize: 28 }}>❌</span>
+            <h3 style={{ margin: 0, color: '#ef4444' }}>Execution Failed</h3>
+          </div>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginBottom: 16 }}>
+            The workflow execution encountered an unrecoverable error. Some nodes could not be reached due to a dependency or Firewall issue.
+            Check the Audit Trail for details.
+          </p>
+          <button className="btn btn-primary" onClick={() => navigate('/')}>
+            ↩ Start a New Case
+          </button>
+        </div>
+      )}
+
+
 
       {/* 1. Init state (No caseId) */}
       {!caseId && (

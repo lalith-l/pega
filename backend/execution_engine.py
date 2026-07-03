@@ -133,30 +133,56 @@ async def execute_case(case_id: str):
     """Main execution loop running as BackgroundTask."""
     print(f"\n⚡ Execution starting for Case {case_id}...")
 
-    async with AsyncSessionLocal() as db:
-        case = await _get_case(db, case_id)
-        if not case:
-            print(f"[Exec] Case {case_id} not found")
-            return
-
-        compiled = case.compiled_workflow
-        if not compiled:
-            print(f"[Exec] No compiled workflow for {case_id}")
-            return
-
-        nodes = compiled.get("nodes", [])
-        checkpoint = case.checkpoint or {"completed_nodes": [], "node_outputs": {}}
-        completed = set(checkpoint.get("completed_nodes", []))
-        node_outputs = checkpoint.get("node_outputs", {})
-
     await _update_case(case_id, {"status": "EXECUTING"})
     await sse_manager.publish(case_id, "EXECUTION_STARTED", {"case_id": case_id})
 
     async with AsyncSessionLocal() as db:
+        case = await _get_case(db, case_id)
+        total_nodes = len(case.compiled_workflow.get("nodes", [])) if case and case.compiled_workflow else 0
         await log_event(db, case_id, "EXECUTION_STARTED", "SYSTEM",
-                        {"case_id": case_id, "total_nodes": len(nodes)})
+                        {"case_id": case_id, "total_nodes": total_nodes})
+
+    # ── STARTUP DIAGNOSTICS ───────────────────────────────────────────────
+    async with AsyncSessionLocal() as db:
+        case = await _get_case(db, case_id)
+        if case and case.compiled_workflow:
+            all_node_ids = [n["node_id"] for n in case.compiled_workflow.get("nodes", [])]
+            cp = case.checkpoint or {}
+            current = cp.get("current_node_id")
+            print(f"[Exec] 🔍 STARTUP CHECK — current_node_id={current!r}")
+            print(f"[Exec] 🔍 Available node IDs: {all_node_ids}")
+
+            # Fail fast if resume pointer is invalid
+            if current and current not in all_node_ids:
+                error_msg = f"current_node_id '{current}' not found in compiled workflow. Available: {all_node_ids}"
+                print(f"[Exec] ❌ FATAL: {error_msg}")
+                await _update_case(case_id, {"status": "FAILED"})
+                async with AsyncSessionLocal() as db2:
+                    await log_event(db2, case_id, "EXECUTION_FAILED", "SYSTEM",
+                                    {"error": error_msg, "current_node_id": current, "available_node_ids": all_node_ids})
+                await sse_manager.publish(case_id, "EXECUTION_FAILED", {"error": error_msg})
+                return
+    # ─────────────────────────────────────────────────────────────────────
 
     while True:
+        # EVERY cycle fetches fresh from SQLite to avoid ANY stale in-memory cache
+        async with AsyncSessionLocal() as db:
+            case = await _get_case(db, case_id)
+            if not case:
+                print(f"[Exec] Case {case_id} not found")
+                break
+                
+            compiled = case.compiled_workflow
+            if not compiled:
+                print(f"[Exec] No compiled workflow for {case_id}")
+                break
+
+            nodes = compiled.get("nodes", [])
+            checkpoint = case.checkpoint or {"completed_nodes": [], "node_outputs": {}}
+            completed = set(checkpoint.get("completed_nodes", []))
+            node_outputs = checkpoint.get("node_outputs", {})
+
+
         executable = _get_executable_nodes(nodes, completed)
         if not executable:
             # Check if all nodes done
@@ -166,14 +192,26 @@ async def execute_case(case_id: str):
             else:
                 # Stuck — dependency cycle or all remaining blocked
                 print(f"[Exec] No executable nodes but not done. Possibly stuck.")
-                break
+                # Mark as FAILED rather than falsely CLOSED_SUCCESS
+                await _update_case(case_id, {"status": "FAILED"})
+                async with AsyncSessionLocal() as db:
+                    await log_event(db, case_id, "EXECUTION_FAILED", "SYSTEM",
+                                    {"error": "Stuck: no executable nodes but not all completed",
+                                     "completed": list(completed),
+                                     "all_nodes": [n["node_id"] for n in nodes]})
+                await sse_manager.publish(case_id, "EXECUTION_FAILED", {
+                    "error": "Execution stuck: some nodes could not be reached due to a dependency or firewall issue."
+                })
+                return
 
         for node in executable:
+
             node_id = node["node_id"]
             node_type = node.get("node_type", "DATA_TRANSFORM")
             label = node.get("label", node_id)
 
             print(f"[Exec] → Running node: {node_id} ({label})")
+            print(f"✅ [LOOP-FETCH] {case_id} Node {node_id} declared_parameters: {node.get('declared_parameters')}")
 
             # Emit NODE_STARTED
             await sse_manager.publish(case_id, "NODE_STARTED", {
@@ -191,12 +229,7 @@ async def execute_case(case_id: str):
             # ── Firewall check for API_CALL nodes ────────────────────────
             if node_type == "FIREWALL_GATE":
                 target_node_id = node.get("guards")
-                
-                # ALWAYS fetch the target node fresh from SQLite so we don't use a stale in-memory cached version
-                async with AsyncSessionLocal() as db:
-                    fresh_case = await _get_case(db, case_id)
-                    fresh_nodes = fresh_case.compiled_workflow.get("nodes", []) if fresh_case and fresh_case.compiled_workflow else nodes
-                    target_node = next((n for n in fresh_nodes if n["node_id"] == target_node_id), {})
+                target_node = next((n for n in nodes if n["node_id"] == target_node_id), {})
                 
                 print(f"🔥 [DEBUG-FIREWALL] Validating node_id: {target_node_id} with declared_parameters: {target_node.get('declared_parameters')}")
 
