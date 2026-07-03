@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: morpheus-backend
+    env: docker
+    dockerContext: backend
+    dockerfilePath: backend/Dockerfile
+    envVars:
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: NEO4J_URI
+        sync: false
+      - key: NEO4J_USERNAME
+        sync: false
+      - key: NEO4J_PASSWORD
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+    disk:
+      name: morpheus-data
+      mountPath: /app/data
+      sizeGB: 1
