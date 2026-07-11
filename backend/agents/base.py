@@ -16,46 +16,7 @@ class BaseAgent:
 
     async def call_llm(self, user_message: str) -> str:
         """Call OpenRouter API and return raw text response."""
-        # ── FAST MOCK FOR DEMO PROMPTS ───────────────────────────────────────
-        print(f"[{self.name}] ⚡ FAST DEMO MOCK TRIGGERED")
-        await asyncio.sleep(1) # simulate small delay
-        if self.name == "ARCHITECT":
-            if "Three agents have objected" in user_message:
-                # Round 2: Just return the same nodes but pretend we addressed them
-                try:
-                    match = re.search(r"Original nodes: (\[.*?\])", user_message, re.DOTALL)
-                    if match:
-                        return match.group(1)
-                except Exception:
-                    pass
-            
-            # Round 1: Return guaranteed failure node for TRC demo
-            return """[
-              {
-                "node_id": "fw_node_002",
-                "node_type": "FIREWALL_GATE",
-                "label": "Firewall: Validate ERP Payment",
-                "guards": "node_003"
-              },
-              {
-                "node_id": "node_003",
-                "node_type": "API_CALL",
-                "label": "ERP Payment Posting",
-                "target_endpoint": "http://localhost:8000/mock-erp/payments/post",
-                "declared_parameters": {
-                  "invoice_number": "INV-123",
-                  "vendor_id": "V-100",
-                  "amount": 125000,
-                  "ifsc_code": "HDFC0001",
-                  "account_number": "12345678",
-                  "vendor_gstin": "29ABCDE1234F1Z5"
-                }
-              }
-            ]"""
-        else:
-            # Security/Compliance/Efficiency - no objections to speed up
-            return "[]"
-        # ───────────────────────────────────────────────────────────────────────
+
 
         headers = {
             "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
