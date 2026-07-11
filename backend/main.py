@@ -3,6 +3,7 @@ Main FastAPI application — MORPHEUS backend.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 
 from db import init_db, close_neo4j
@@ -56,7 +57,7 @@ app.include_router(cases.router)
 app.include_router(mock_router)
 
 
-@app.get("/")
+@app.get("/api")
 async def root():
     return {
         "system": "MORPHEUS",
@@ -75,6 +76,14 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+# Mount frontend correctly
+import os
+frontend_path = os.path.join(os.path.dirname(__file__), "../frontend/dist")
+if os.path.exists(frontend_path):
+    app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
+else:
+    print(f"⚠️ Frontend dist directory not found at {frontend_path}")
 
 
 # ── Init __init__ files ───────────────────────────────────────────────────────

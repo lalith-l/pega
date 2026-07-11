@@ -5,6 +5,7 @@ Provides N-1 to agents and N to Firewall.
 """
 import json
 from pathlib import Path
+from typing import Optional
 from neo4j_service import neo4j_service
 
 SPECS_DIR = Path(__file__).parent / "specs"
@@ -46,15 +47,15 @@ async def load_registry():
                 
     print(f"[SchemaRegistry] Loaded {_agent_registry.keys()} (Agent) and {_production_registry.keys()} (Production)")
 
-def get_agent_schema(endpoint: str) -> dict | None:
+def get_agent_schema(endpoint: str) -> Optional[dict]:
     """Return N-1 schema for LLM agents."""
     return _match_schema(endpoint, _agent_registry)
 
-def get_production_schema(endpoint: str) -> dict | None:
+def get_production_schema(endpoint: str) -> Optional[dict]:
     """Return N schema for Firewall validation."""
     return _match_schema(endpoint, _production_registry)
 
-def _match_schema(endpoint: str, registry: dict) -> dict | None:
+def _match_schema(endpoint: str, registry: dict) -> Optional[dict]:
     if endpoint in registry:
         return registry[endpoint]
     for registered_endpoint, schema in registry.items():
