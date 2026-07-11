@@ -728,6 +728,18 @@ function CaseDashboard() {
             })}
           </div>
 
+          {courtStatus?.session_status === 'FAILED' && (
+            <div className="card" style={{ padding: 24, marginBottom: 20, border: '1px solid rgba(239, 68, 68, 0.3)', background: 'rgba(239, 68, 68, 0.05)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                <span style={{ fontSize: 24 }}>❌</span>
+                <h3 style={{ margin: 0, color: '#ef4444' }}>Architecture Court Failed</h3>
+              </div>
+              <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>
+                {courtStatus?.error_message || "An unknown error occurred during deliberation."}
+              </p>
+            </div>
+          )}
+
           {courtRecord && (
             <div className="fade-in" style={{ position: 'relative' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>

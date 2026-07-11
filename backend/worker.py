@@ -117,6 +117,9 @@ async def run_court_session(session_id: str, case_id: str, business_objective: s
             
         initial_nodes = await architect_agent.run_round1(business_objective)
         
+        if not initial_nodes:
+            raise ValueError("Architect Agent returned 0 nodes. Please check if OPENROUTER_API_KEY is configured in Render Environment Variables.")
+        
         # Write Parameter Declaration CausalNodes for each API_CALL
         from firewall.schema_registry import get_production_schema
         for node in initial_nodes:
