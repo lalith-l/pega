@@ -33,9 +33,19 @@ class BaseAgent:
             "temperature": 0.3,
             "max_tokens": 4096,
         }
+        fallback_models = [
+            settings.OPENROUTER_MODEL,
+            "google/gemma-2-9b-it:free",
+            "meta-llama/llama-3-8b-instruct:free",
+            "qwen/qwen-2-7b-instruct:free",
+            "huggingfaceh4/zephyr-7b-beta:free",
+            "mistralai/mistral-7b-instruct:free"
+        ]
+
         async with httpx.AsyncClient(timeout=90.0) as client:
-            retries = 5
-            for attempt in range(retries):
+            retries = len(fallback_models)
+            for attempt, model in enumerate(fallback_models):
+                payload["model"] = model
                 try:
                     resp = await client.post(
                         f"{settings.OPENROUTER_BASE_URL}/chat/completions",
@@ -53,14 +63,13 @@ class BaseAgent:
                     data = resp.json()
                     return data["choices"][0]["message"]["content"]
                 except Exception as e:
-                    if attempt < retries - 1:
-                        await asyncio.sleep(3)
-                    else:
-                        error_details = str(e)
-                        if hasattr(e, 'response') and e.response:
-                            error_details += f" - Response: {e.response.text}"
-                        print(f"[{self.name}] Final LLM error: {error_details}")
-                        raise RuntimeError(f"LLM API Error: {error_details}")
+                    error_details = str(e)
+                    if hasattr(e, 'response') and e.response:
+                        error_details += f" - Response: {e.response.text}"
+                        
+                    print(f"[{self.name}] LLM error on model {model}: {error_details}")
+                    if attempt == retries - 1:
+                        raise RuntimeError(f"LLM API Error (All models failed): {error_details}")
         return "[]"
 
     def extract_json(self, text: str) -> any:
