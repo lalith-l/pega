@@ -3,7 +3,7 @@ services:
     name: morpheus-backend
     env: docker
     plan: free
-    dockerContext: backend
+    dockerContext: .
     dockerfilePath: backend/Dockerfile
     envVars:
       - key: OPENROUTER_API_KEY
