@@ -35,11 +35,11 @@ class BaseAgent:
         }
         fallback_models = [
             settings.OPENROUTER_MODEL,
-            "google/gemma-2-9b-it:free",
-            "meta-llama/llama-3-8b-instruct:free",
-            "qwen/qwen-2-7b-instruct:free",
-            "huggingfaceh4/zephyr-7b-beta:free",
-            "mistralai/mistral-7b-instruct:free"
+            "openrouter/free",
+            "google/gemma-4-31b-it:free",
+            "liquid/lfm-2.5-1.2b-instruct:free",
+            "cohere/north-mini-code:free",
+            "poolside/laguna-m.1:free"
         ]
 
         async with httpx.AsyncClient(timeout=90.0) as client:
