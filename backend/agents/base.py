@@ -56,8 +56,11 @@ class BaseAgent:
                     if attempt < retries - 1:
                         await asyncio.sleep(3)
                     else:
-                        print(f"[{self.name}] Final LLM error: {e}")
-                        return "[]"
+                        error_details = str(e)
+                        if hasattr(e, 'response') and e.response:
+                            error_details += f" - Response: {e.response.text}"
+                        print(f"[{self.name}] Final LLM error: {error_details}")
+                        raise RuntimeError(f"LLM API Error: {error_details}")
         return "[]"
 
     def extract_json(self, text: str) -> any:
