@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://morpheus.ai/favicon.ico" alt="Morpheus Logo" width="80" />
+  <img src="./logo.jpeg" alt="Morpheus Logo" width="80" />
   <h1>MORPHEUS</h1>
   <p><strong>The Autonomous Multi-Agent Workflow Architect</strong></p>
   
